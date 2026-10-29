@@ -1,0 +1,21 @@
+== Controles declarados en el compose ==
+    cap_drop:
+    mem_limit: "268435456"
+    read_only: true
+    cap_drop:
+    mem_limit: "268435456"
+    read_only: true
+        read_only: true
+        read_only: true
+    cap_drop:
+    mem_limit: "134217728"
+    read_only: true
+    internal: true
+
+== Prueba de salida a Internet (debe fallar) ==
+-- PHP:
+SIN SALIDA
+-- Node.js:
+SIN SALIDA TypeError
+-- Python:
+SIN SALIDA URLError
