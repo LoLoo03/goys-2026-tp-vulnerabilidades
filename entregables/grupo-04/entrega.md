@@ -25,8 +25,8 @@ Evidencia: [`capturas/01-inventario-antes.txt`](capturas/01-inventario-antes.txt
 | Activo | Versión | ¿Expuesto a Internet? | ¿Procesa contenido no confiable? | ¿Afectado? | Evidencia |
 |--------|---------|:---------------------:|:--------------------------------:|:----------:|-----------|
 | Portal PHP (`php-lab`, web01) | PHP 8.3.35, Apache + mod_php | No en el lab / Sí en el despliegue supuesto | Sí: formulario con sesiones y subida de archivos | **Sí** (PHP2Shell, CVE-2026-109618/109619; corregido en 8.3.36) | `PHP 8.3.35 (cli)`; `session.upload_progress.enabled=1`; imagen `php:8.3.35-apache`; `docker top` muestra `apache2 -DFOREGROUND` (master root + workers www-data), sin `php-fpm` |
-| API Node.js (`node-lab`, api01) | Node v22.23.3, brotli 1.1.0 (del runtime), Express 5 | No en el lab / Sí en el despliegue supuesto | Sí: `POST /decode` descomprime cuerpos `Content-Encoding: br` de clientes | **Sí** (Node2Shell, CVE-2026-111497; corregido en 22.23.4) | `v22.23.3 / brotli 1.1.0`; `npm ls` sin paquete brotli externo: el decoder lo aporta el runtime |
-| Servicio Python (`py-lab`, svc01) | Python 3.11.18, brotli 1.0.9 (PyPI) | No | Parcial: decodifica `br` de lo que le llega por la red interna | **Sí** (CVE-2026-111497; brotli 1.0.3–1.2.0 afectado, corregido en 1.2.1) | `brotli 1.0.9` |
+| API Node.js (`node-lab`, api01) | Node v22.23.3, brotli 1.1.0 (del runtime), Express 5 | No en el lab / Sí en el despliegue supuesto | Sí: `POST /decode` recibe cuerpos `Content-Encoding: br` de clientes; el decoder corre en body-parser (`express.raw`) antes del handler | **Sí** (Node2Shell, CVE-2026-111497; corregido en 22.23.4) | `v22.23.3 / brotli 1.1.0`; `npm ls` sin paquete brotli externo: el decoder lo aporta el runtime |
+| Servicio Python (`py-lab`, svc01) | Python 3.11.18, brotli 1.0.9 (PyPI) | No | Parcial: decodifica `br` de lo que le llega por la red interna | **Sí** (CVE-2026-111497; brotli 1.0.3–1.2.0 afectado, corregido en 1.0.10 / 1.1.1 / 1.2.1) | `brotli 1.0.9` |
 
 **SAPI de PHP.** `inventario.sh` corre `php -v` por CLI, así que muestra `(cli)`. El
 SAPI web se deduce de la imagen `-apache` y del árbol de procesos: solo hay
@@ -39,6 +39,19 @@ dejamos el comando que lo haría, sin ejecutar.
 **Brotli en Node: el string no alcanza como evidencia.** El runtime informa brotli
 1.1.0 en la versión vulnerable y sigue informando 1.1.0 en la corregida
 (ver sección 3). La señal válida es la versión de Node (22.23.4), no el string.
+
+**Dónde se decodifica Brotli en la API.** `server.js` usa `express.raw()` en
+`POST /decode`. En Express 5, `express.raw` es body-parser 2, que por defecto
+(`inflate: true`) **ya descomprime** los cuerpos con `Content-Encoding: br` antes de
+que corra el handler (`recursos/contexto.md`, "Cómo llega al decoder"). Esto sale de
+leer el código y la documentación; no se probó en el laboratorio. Consecuencias:
+
+- El decoder vulnerable se alcanza en body-parser aunque el handler no hiciera nada
+  con Brotli. Sacar `brotliDecompressSync` del handler no saca a la API del alcance.
+- El handler vuelve a decodificar un cuerpo que ya llega descomprimido, así que un
+  `POST /decode` legítimo con `br` probablemente responda `400 brotli invalido`. Es
+  un bug funcional, ajeno al CVE, que solo aparecería con una prueba funcional con
+  un cuerpo Brotli benigno (ver "Qué no se pudo probar").
 
 **Supuestos de exposición:**
 
@@ -143,7 +156,13 @@ docker compose --env-file versions.env up -d --wait
 
 **Ventana de cambio.** En el lab, el corte fue de unos segundos por servicio
 (recreación de contenedores). En producción, PHP va en ventana de emergencia el mismo
-día; Node en la próxima ventana dentro de 72 h; Python en la ventana semanal.
+día; Node en la próxima ventana dentro de 72 h; Python en la ventana semanal (o en
+72 h, por lo visto en la detección; ver sección 2).
+
+**Versión destino de brotli en Python.** El aviso corrige en 1.0.10, 1.1.1 y 1.2.1.
+`parchear.sh` sube de 1.0.9 a 1.2.1, que es un salto de rama. En producción, el
+cambio mínimo y de menor riesgo de compatibilidad sería 1.0.10, dentro de la misma
+rama 1.0.x. En el lab se usó 1.2.1 porque es lo que define la cátedra.
 
 **Detalle del ajuste de entorno (Kaspersky).** La CA se exportó del almacén de
 certificados raíz de Windows a un archivo PEM (`kaspersky-ca.crt`) fuera del repo.
@@ -280,7 +299,7 @@ Evidencia: [`capturas/03-contencion-antes.txt`](capturas/03-contencion-antes.txt
 | Filesystem read-only | `read_only: true` + `tmpfs` solo en `/tmp` (y rutas de Apache) | `read_only: true` en los 3 servicios en `docker compose config`; código de PHP montado `:ro` | **Sí** (declarado) | No se puede modificar el código ni dejar un webshell persistente; lo que se escriba en `tmpfs` desaparece al reiniciar |
 | Capabilities mínimas | `cap_drop: ALL`; PHP recupera solo `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `NET_BIND_SERVICE`; `no-new-privileges:true` | `docker compose config` | **Sí** (declarado) | Sin capacidades de red cruda, montaje ni administración; `no-new-privileges` bloquea escalar con binarios setuid |
 | Límites de memoria/PIDs | `mem_limit` 256 MB (PHP, Node) / 128 MB (Python); `pids_limit` 100 / 100 / 50 | `docker compose config` | **Sí** (declarado) | Acota minería, fork bombs y que un contenedor comprometido tumbe al host |
-| Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js` decodifica `br` explícitamente | **No** | Control propuesto: rechazar `br` en el proxy (o en Express) mientras no se parchee. Cortaría el camino de entrada de Node2Shell |
+| Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js`: `express.raw()` con `inflate` por defecto (`true`) | **No** | Control propuesto mientras no se parchee: rechazar `br` en el proxy, o en la app con `express.raw({ inflate: false })`, que hace que body-parser responda 415 a cuerpos comprimidos **antes** de tocar el decoder. Un filtro dentro del handler llegaría tarde. Corta el camino de entrada de Node2Shell; costo: `/decode` deja de aceptar Brotli, así que es temporal |
 
 **Prueba de salida a Internet:** falla en los tres servicios, antes y después del
 parche: PHP `SIN SALIDA`, Node `SIN SALIDA TypeError`, Python `SIN SALIDA URLError`.
