@@ -86,7 +86,7 @@ Las imágenes de PHP y Python se obtuvieron sin cambios.
 |--------|:----:|:----------------:|:----------:|:----------:|------------------|
 | Portal PHP | 9.2 (CVSS 4.0) | **Sí**: confirmada, en CISA KEV desde 26/10 | Alta (supuesto: publicado, mod_php) | Alta: datos de legajos de personal | **1.º — Ya.** Mitigación inmediata (`upload_progress = 0`) y parche a 8.3.36 en ventana de emergencia, **< 24 h** |
 | API Node.js | 9.2 (Google, CNA) / High (Node.js) | No confirmada al 27/10; RCE demostrado en laboratorio | Alta (supuesto: recibe `br` de clientes; Express 5 descomprime) | Media-alta | **2.º — < 72 h.** Parche a 22.23.4 en ventana de cambio; mientras tanto, rechazar `Content-Encoding: br` en el proxy |
-| Servicio Python | 9.2 (mismo CVE) | No confirmada | Baja: solo red interna | Media | **3.º — ventana estándar, ≤ 7 días.** Actualizar brotli a 1.2.1 |
+| Servicio Python | 9.2 (mismo CVE) | No confirmada | Baja por diseño (solo red interna), pero **alcanzada**: el log muestra comandos en svc01 | Media | **3.º — < 72 h.** Actualizar brotli (1.0.10 o 1.2.1). Sin el incidente iría en la ventana estándar (≤ 7 días); sube por la actividad detectada (ver abajo) |
 
 **Justificación:** el orden no sale del CVSS (los tres tienen 9.2) sino de la
 **explotación real** y la **exposición**. PHP2Shell está en KEV y se explota desde
@@ -94,7 +94,8 @@ antes del disclose; con mod_php no importa qué hace la app. Node2Shell tiene el
 puntaje pero todavía no hay explotación maliciosa confirmada, y la API se puede
 proteger mientras tanto filtrando Brotli en el borde. El servicio Python comparte el
 CVE pero no recibe tráfico externo: para llegar a él, el atacante primero tiene que
-estar adentro.
+estar adentro. Por eso es el tercero, aunque comparte plazo con la API por lo que
+muestra el log.
 
 **Qué evidencia cambiaría el orden:**
 
@@ -102,11 +103,11 @@ estar adentro.
   la API pasa a emergencia (< 24 h), igual que PHP.
 - Se descubre que el proxy o algún cliente interno reenvía cuerpos `br` externos al
   servicio Python → sube a la prioridad de la API.
-- El log de la sección 4 (procesos hijos de `python` en svc01) indica actividad en el
-  servicio interno: si se confirma, svc01 deja de ser "solo interno" y se trata como
-  comprometido, no como un activo que solo espera el parche.
+- Actividad del atacante en el servicio interno (procesos hijos de `python` en
+  svc01) → svc01 deja de ser "solo interno" y se trata como comprometido, no como un
+  activo que solo espera el parche.
 
-**Esa evidencia ya apareció.** [`deteccion.md`](deteccion.md) concluye que hubo
+**Esta última evidencia ya apareció.** [`deteccion.md`](deteccion.md) concluye que hubo
 ejecución de comandos en web01, api01 **y svc01** (27/10, 09:42–09:45 UTC). La matriz
 de arriba es la decisión por vulnerabilidad. Con el compromiso detectado, en
 producción va precedida por un paso 0 que no depende del CVSS:
@@ -115,14 +116,14 @@ producción va precedida por un paso 0 que no depende del CVSS:
 |---|---|---|---|
 | 0 | web01, api01, svc01 | Tratar como incidente: aislar de la red, preservar evidencia (memoria, disco, logs) y rotar los secretos accesibles desde esos servicios | Inmediato, antes de parchear |
 | 0 | db01 | Identificar las sesiones SSH de 09:42–09:49 (usuario, origen, método). Si no se explican, se suma al incidente | Inmediato |
-| 1–3 | Los tres | Parchear según la matriz, **reconstruyendo desde imágenes limpias** y no sobre el contenedor comprometido | Plazos de la matriz, salvo svc01 (ver abajo) |
+| 1–3 | Los tres | Parchear según la matriz, **reconstruyendo desde imágenes limpias** y no sobre el contenedor comprometido | Plazos de la matriz |
 
 - Parchear un servicio comprometido cierra la entrada, pero no saca al atacante.
   Por eso el aislamiento va primero.
-- **svc01 sube de prioridad.** Lo pusimos último porque suponíamos que solo era
+- **svc01 sube de plazo.** Lo pusimos último porque suponíamos que solo era
   alcanzable desde adentro. Que haya ejecutado `uname -a` demuestra que alguien ya
-  llega a él, así que su parche pasa al plazo de la API (**< 72 h**) y su
-  reconstrucción entra en el paso 0.
+  llega a él. Por eso su parche pasó de ≤ 7 días al plazo de la API (**< 72 h**, ya
+  reflejado en la matriz) y su reconstrucción entra en el paso 0.
 - No cambia el orden entre PHP y Node: el log no permite atribuir el acceso a uno u
   otro CVE (ver "Lo que no sabemos" en `deteccion.md`).
 
@@ -156,8 +157,8 @@ docker compose --env-file versions.env up -d --wait
 
 **Ventana de cambio.** En el lab, el corte fue de unos segundos por servicio
 (recreación de contenedores). En producción, PHP va en ventana de emergencia el mismo
-día; Node en la próxima ventana dentro de 72 h; Python en la ventana semanal (o en
-72 h, por lo visto en la detección; ver sección 2).
+día; Node y Python en la próxima ventana dentro de 72 h. Python iría en la ventana
+semanal, pero subió por la actividad detectada en svc01 (sección 2).
 
 **Versión destino de brotli en Python.** El aviso corrige en 1.0.10, 1.1.1 y 1.2.1.
 `parchear.sh` sube de 1.0.9 a 1.2.1, que es un salto de rama. En producción, el
