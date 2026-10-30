@@ -33,7 +33,8 @@ SAPI web se deduce de la imagen `-apache` y del árbol de procesos: solo hay
 `apache2`, sin `php-fpm`, por lo tanto PHP corre como módulo de Apache (mod_php), el
 caso de **mayor riesgo** según el aviso: el ataque ocurre antes de que corra la app.
 No imprimimos el SAPI web directamente (la página `index.php` lo muestra, pero no hay
-puertos publicados y la guía no incluye un comando para pedirla).
+puertos publicados y la guía no incluye un comando para pedirla). En la sección 3
+dejamos el comando que lo haría, sin ejecutar.
 
 **Brotli en Node: el string no alcanza como evidencia.** El runtime informa brotli
 1.1.0 en la versión vulnerable y sigue informando 1.1.0 en la corregida
@@ -161,12 +162,29 @@ La verificación TLS no se desactivó: npm sigue validando el certificado, pero 
 la CA de Kaspersky. La CA se borra de la imagen al terminar la instalación.
 
 **Prueba funcional mínima:** después de la mitigación y después del parche, los tres
-servicios pasaron su healthcheck (`docker compose ps` → `healthy`), que es una prueba
-funcional real de cada app y no solo del contenedor:
+servicios pasaron su healthcheck (`docker compose ps` → `healthy`). El alcance de esa
+prueba no es el mismo en los tres:
 
-- PHP: abre una conexión a `127.0.0.1:80` (Apache atiende).
-- Node: `fetch('http://127.0.0.1:3000/')` y exige respuesta `ok` (Express responde).
-- Python: `urlopen('http://127.0.0.1:8000/')` (el servidor HTTP responde).
+- Node: `fetch('http://127.0.0.1:3000/')` y exige respuesta `ok`. Ejecuta la ruta `/`
+  de Express: prueba la app.
+- Python: `urlopen('http://127.0.0.1:8000/')`. Ejecuta `do_GET`, que consulta el
+  módulo `brotli`: prueba la app.
+- PHP: `php -r` con `fsockopen('127.0.0.1', 80)`. Solo comprueba que Apache **acepta
+  conexiones TCP**, y lo hace desde el PHP de **CLI**. No prueba que mod_php
+  interprete `index.php`: un Apache con el módulo PHP roto pasaría igual.
+
+En PHP, entonces, la prueba funcional es más débil que en los otros dos. Este comando
+la cerraría sin publicar puertos ni salir de la red, porque pide la página por
+loopback dentro del mismo contenedor. **No se ejecutó**: se identificó en la revisión
+del 30/10, con el laboratorio ya apagado.
+
+```bash
+docker compose exec -T php-lab php -r 'echo file_get_contents("http://127.0.0.1/");' \
+  | grep -A1 -E 'PHP:|SAPI:|upload_progress'
+```
+
+Resultado esperado: `8.3.36`, `apache2handler` y `upload_progress.enabled` en `0`.
+Además confirmaría el SAPI web, que en la sección 1 se dedujo del árbol de procesos.
 
 **Qué no se pudo probar:**
 
