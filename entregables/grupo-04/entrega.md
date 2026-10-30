@@ -93,6 +93,26 @@ estar adentro.
   servicio interno: si se confirma, svc01 deja de ser "solo interno" y se trata como
   comprometido, no como un activo que solo espera el parche.
 
+**Esa evidencia ya apareció.** [`deteccion.md`](deteccion.md) concluye que hubo
+ejecución de comandos en web01, api01 **y svc01** (27/10, 09:42–09:45 UTC). La matriz
+de arriba es la decisión por vulnerabilidad. Con el compromiso detectado, en
+producción va precedida por un paso 0 que no depende del CVSS:
+
+| Paso | Activo | Acción | Plazo |
+|---|---|---|---|
+| 0 | web01, api01, svc01 | Tratar como incidente: aislar de la red, preservar evidencia (memoria, disco, logs) y rotar los secretos accesibles desde esos servicios | Inmediato, antes de parchear |
+| 0 | db01 | Identificar las sesiones SSH de 09:42–09:49 (usuario, origen, método). Si no se explican, se suma al incidente | Inmediato |
+| 1–3 | Los tres | Parchear según la matriz, **reconstruyendo desde imágenes limpias** y no sobre el contenedor comprometido | Plazos de la matriz, salvo svc01 (ver abajo) |
+
+- Parchear un servicio comprometido cierra la entrada, pero no saca al atacante.
+  Por eso el aislamiento va primero.
+- **svc01 sube de prioridad.** Lo pusimos último porque suponíamos que solo era
+  alcanzable desde adentro. Que haya ejecutado `uname -a` demuestra que alguien ya
+  llega a él, así que su parche pasa al plazo de la API (**< 72 h**) y su
+  reconstrucción entra en el paso 0.
+- No cambia el orden entre PHP y Node: el log no permite atribuir el acceso a uno u
+  otro CVE (ver "Lo que no sabemos" en `deteccion.md`).
+
 En el laboratorio, como el costo era bajo y no hay usuarios reales, aplicamos los tres
 parches en la misma sesión; el orden de arriba es el que aplicaríamos en producción.
 
