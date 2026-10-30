@@ -5,10 +5,14 @@
 
 | Integrante | Usuario de GitHub | Rol en el TP |
 |---|---|---|
-| Lorenzo Bellomo | LoLoo3 | Inventario, cambios/parche, detección, contención/comunicación |
+| Lorenzo Bellomo | LoLoo03 | Inventario, cambios/parche, detección, contención/comunicación |
+| Agustín Kloster | AgusKlos | Revisión de `entrega.md` y `deteccion.md`, preparación del comité |
 
 > El taller lo ejecutó un solo integrante presente en el aula; por eso concentra los
-> cuatro roles. Las horas están en UTC (reloj de Docker); en Argentina son UTC−3.
+> cuatro roles. La revisión posterior (30/10) se hizo sobre el código del laboratorio,
+> `audit.log` y las capturas, **sin volver a levantar el laboratorio**: lo que agrega
+> esa revisión es análisis, no evidencia nueva de ejecución.
+> Las horas están en UTC (reloj de Docker); en Argentina son UTC−3.
 
 ---
 
