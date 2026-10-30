@@ -1,6 +1,6 @@
 # Informe individual — Grupo 04
 
-**Integrante:** Agustín Kloster (AgusKlos) · **Fecha:** 30/10/2026
+**Integrante:** Agustin Ignacio Kloster (AgusKlos) · **Fecha:** 30/10/2026
 **Destinatario:** gerencia de operaciones
 
 **Caso:** la organización del laboratorio. Tiene un portal publicado en Internet donde
