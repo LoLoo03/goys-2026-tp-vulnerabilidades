@@ -373,4 +373,4 @@ de emergencia para actualizar el portal en menos de 24 horas.
 - [x] Sin claves, tokens ni placeholders.
 - [ ] Repo pusheado y PR abierto.
 
-Checklist completa: [`../docs/checklist-entrega.md`](../docs/checklist-entrega.md).
+Checklist completa: [`../../docs/checklist-entrega.md`](../../docs/checklist-entrega.md).
