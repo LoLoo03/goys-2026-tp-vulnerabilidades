@@ -335,7 +335,33 @@ RCE en el portal llegue directo al servicio interno.
 
 ---
 
-## 7. Checklist antes de entregar
+## 7. Preparación del comité de crisis
+
+Respuestas preparadas para las preguntas de [`docs/comite.md`](../../docs/comite.md),
+apoyadas en la evidencia de las secciones anteriores.
+
+**Mensaje de apertura (2 min).** El 21/10 se publicaron dos fallas que afectan a
+nuestros tres sistemas. Una, en el portal de legajos, ya se usa para atacar
+organizaciones reales. La otra, en la API, todavía no. Además, los registros del
+27/10 muestran comandos que nuestros sistemas no ejecutan normalmente, así que lo
+tratamos como un incidente y no solo como un parche pendiente. **Pedimos dos
+decisiones:** autorización para aislar hoy los tres servicios afectados y una ventana
+de emergencia para actualizar el portal en menos de 24 horas.
+
+| # | Pregunta | Respuesta | Evidencia |
+|---|---|---|---|
+| 1 | ¿Parcheamos en caliente facturación sin entorno de pruebas? | No a ciegas, pero tampoco esperamos. Ahora: mitigación de una línea, reversible en segundos. El mismo día: respaldo, ventana corta, actualización y una operación de prueba (emitir una factura de prueba). Volver atrás es la misma operación que actualizar. Con una falla en KEV, el riesgo de no parchear es mayor | §3: mitigación y reversión de PHP; parche en segundos por servicio |
+| 2 | El hosting no actualiza PHP hasta el viernes. ¿Qué compensamos? | Hasta el viernes: (a) `upload_progress = 0`; (b) restringir quién llega al portal (VPN o lista de IPs, si el uso lo permite); (c) bloquear la salida a Internet del servidor; (d) alerta por procesos hijos de `apache2`. Verificación: valor del `.ini`, prueba de salida que falla y regla probada contra `audit.log`. El dueño del portal firma la aceptación del riesgo residual hasta el viernes | §3, §5 (`SIN SALIDA`), `deteccion.md` §4 |
+| 3 | Node2Shell no se explota todavía. ¿Ventana de emergencia? | Por el CVE solo, no: se cubre rechazando Brotli (proxy o `inflate: false`) y parcheando en < 72 h. Pasaríamos a emergencia si entra en KEV, aparece un exploit público o vemos intentos propios (cuerpos `br` anómalos, reinicios por crash de `node`). **En nuestro caso** ya hay ejecución de comandos en api01: la urgencia viene del incidente, no del CVE | §2, §5, `deteccion.md` §2.2 |
+| 4 | ¿Qué le decimos a clientes y cuándo? | Cuando tengamos el alcance mínimo y la contención en marcha, sin esperar a cerrar la investigación. Mensaje: detectamos actividad no autorizada, la contuvimos, estamos investigando si hubo acceso a datos y decimos qué deberían hacer ellos. Nunca: versiones, qué falta parchear, IPs ni vector. Como el portal guarda datos personales, legales evalúa si hay que notificar (Ley 25.326) | — |
+| 5 | Si el atacante usa un agente para post-explotación, ¿qué sigue funcionando? | Lo que no depende del perímetro: sin salida a Internet (la segunda etapa no descarga), usuario sin privilegios, filesystem de solo lectura, `no-new-privileges` y límites de PIDs. Un agente trabaja en lotes rápidos, y la alerta por proceso hijo dispara en el primer comando. Lo que **no** frena: el movimiento lateral dentro de la red interna (svc01) → segmentar | §5, `deteccion.md` §4 |
+| 6 | ¿Qué nos hace pasar de "monitorear" a "apagar"? | Ejecución de comandos desde un servicio (ya la tenemos, 27/10), conexiones salientes exitosas, acceso no explicado a db01 o señales de exfiltración. Con la primera ya **aislamos**. Apagar destruye la memoria, que es evidencia: preferimos cortar la red y apagar solo si aislar no alcanza | `deteccion.md` §2 |
+| 7 | El CERT avisa un martes a las 9:40. ¿Qué hacemos primero? | 9:40–10:00: ¿tenemos el producto?, ¿dónde?, ¿expuesto? (inventario, incluidas las dependencias que vienen dentro de otros componentes). 10:00–11:00: mitigación reversible en lo expuesto y búsqueda en los logs **desde antes** del aviso. Antes del mediodía: dueños, ventana y mensaje interno. Un responsable por tarea | §1, §6 |
+| 8 | ¿Cómo sabemos que el parche quedó y que la app funciona? | Por la versión que informa cada runtime (8.3.36, v22.23.4, brotli 1.2.1), no por el string de Brotli de Node, que no cambia. Y con una prueba funcional: los healthchecks pasan, aunque en PHP la prueba es débil y lo declaramos | §3, [`capturas/06-parche-despues.txt`](capturas/06-parche-despues.txt) |
+
+---
+
+## 8. Checklist antes de entregar
 
 - [x] El laboratorio arrancó y los 3 servicios quedaron `healthy`.
 - [x] Inventario con evidencia (versión, SAPI, configuración).
