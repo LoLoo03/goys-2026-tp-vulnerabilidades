@@ -190,6 +190,8 @@ parches en la misma sesión; el orden de arriba es el que aplicaríamos en produ
 | 2026-10-29 22:47:58Z | Portal PHP | **Mitigación:** `laboratorio/php/php.ini`: `session.upload_progress.enabled = 1` → `0`; `docker compose restart php-lab` | `session.upload_progress.enabled=1` | `session.upload_progress.enabled=0`; `php-lab` `healthy` a los 8 s ([`04-mitigacion-php.txt`](capturas/04-mitigacion-php.txt)) | Restaurar `1` y reiniciar solo en una reversión autorizada y aislada; no retirar esta mitigación mientras el riesgo siga abierto |
 | 2026-10-29 22:48:26Z | Los tres | **Intento de parche** con `./scripts/parchear.sh` | Versiones vulnerables | **Falló** el rebuild de Node por la intercepción de Kaspersky (`SELF_SIGNED_CERT_IN_CHAIN`); no se recreó ningún contenedor ([`05-parchear-intento.txt`](capturas/05-parchear-intento.txt)) | No aplica: no cambió nada |
 | 2026-10-29 22:53:11Z | Los tres | **Parche** con las mismas variables que `parchear.sh`, sin reconstruir Node (comando abajo) | PHP 8.3.35, Node v22.23.3, brotli (Py) 1.0.9 | PHP **8.3.36**, Node **v22.23.4**, brotli (Py) **1.2.1**; los 3 `healthy`; la mitigación de PHP sigue en `0` ([`06-parche-despues.txt`](capturas/06-parche-despues.txt)) | `docker compose --env-file versions.env up -d --wait`: `versions.env` vuelve a las versiones anteriores, cuyas imágenes siguen en el equipo. Mantener `upload_progress = 0` y el aislamiento; no devolver versiones vulnerables al tráfico externo |
+| 2026-11-01 17:08:50Z (re-ejecución) | Los tres | **Parche** con `./scripts/parchear.sh` **sin modificaciones**, en un equipo sin intercepción HTTPS | PHP 8.3.35, Node v22.23.3, brotli (Py) 1.0.9 | PHP **8.3.36**, Node **v22.23.4**, brotli (Py) **1.2.1**; los 3 `healthy`; el build de Node con el `Dockerfile` de la cátedra funcionó (`added 65 packages`). Pruebas funcionales A–I con el mismo resultado antes y después ([`10`](capturas/10-parchear-sh.txt), [`09`](capturas/09-funcional-antes.txt), [`11`](capturas/11-funcional-despues.txt)) | La de la fila siguiente, ensayada |
+| 2026-11-01 17:12:00Z (re-ejecución) | Los tres | **Ensayo de reversión** y re-aplicación del parche | PHP 8.3.36, Node v22.23.4, brotli 1.2.1 | `docker compose --env-file versions.env up -d --wait` volvió a 8.3.35 / v22.23.3 / 1.0.9 con los 3 `healthy` en ~5 s; `upload_progress` siguió en `0`. Se re-aplicó `parchear.sh` y se apagó el lab con `down -v` ([`14`](capturas/14-reversion-y-apagado.txt)) | No aplica: es el ensayo |
 
 **Parche aplicado (equivalente a `parchear.sh`).** `parchear.sh` exporta
 `PHP_TAG=8.3.36-apache`, `NODE_TAG=22.23.4-bookworm-slim` y `BROTLI_VERSION=1.2.1` y
@@ -212,8 +214,10 @@ evidencia y decidir entre mantener el servicio suspendido o recuperar una imagen
 limpia conocida bajo aislamiento y controles compensatorios. Una imagen anterior
 sospechada de compromiso no es un respaldo confiable. No restaurar secretos expuestos
 ni reabrir tráfico únicamente porque el healthcheck pase. Validar la operación que
-falló y fijar responsable y vencimiento del riesgo residual. No se ensayó esta
-reversión en la presente revisión.
+falló y fijar responsable y vencimiento del riesgo residual. La reversión técnica se **ensayó**
+el 01/11 en el laboratorio (tabla anterior, ~5 s, los 3 `healthy`); lo que no se
+ensayó es el procedimiento organizativo (registro, decisión, imagen limpia), que no
+tiene equivalente en el lab.
 
 **Límite de la mitigación PHP.** Desactivar `session.upload_progress.enabled` reduce
 rutas concretas, pero no reemplaza el parche ni cubre todas las variantes. No se
@@ -279,32 +283,46 @@ prueba no es el mismo en los tres:
   conexiones TCP**, y lo hace desde el PHP de **CLI**. No prueba que mod_php
   interprete `index.php`: un Apache con el módulo PHP roto pasaría igual.
 
-En PHP, entonces, la prueba funcional es más débil que en los otros dos. Este comando
-la cerraría sin publicar puertos ni salir de la red, porque pide la página por
-loopback dentro del mismo contenedor. **No se ejecutó**: se identificó en la revisión
-del 30/10, con el laboratorio ya apagado.
+En PHP, entonces, el healthcheck es más débil que en los otros dos. El comando
+siguiente lo cierra sin publicar puertos ni salir de la red, porque pide la página
+por loopback dentro del mismo contenedor. Se identificó en la revisión del 30/10 y
+se **ejecutó el 01/11**:
 
 ```bash
 docker compose exec -T php-lab php -r 'echo file_get_contents("http://127.0.0.1/");' \
   | grep -A1 -E 'PHP:|SAPI:|upload_progress'
 ```
 
-Resultado esperado: `8.3.36`, `apache2handler` y `upload_progress.enabled` en `0`.
-Además confirmaría el SAPI web, que en la sección 1 se dedujo del árbol de procesos.
+Resultado: antes del parche `8.3.35`, después `8.3.36`; en ambos casos SAPI
+**`apache2handler`** y `upload_progress.enabled` en `0`
+([`09`](capturas/09-funcional-antes.txt) y [`11`](capturas/11-funcional-despues.txt),
+prueba A). Esto confirma por la vía directa el SAPI web que la sección 1 había
+deducido del árbol de procesos: mod_php.
+
+**Pruebas funcionales del 01/11** (mismo resultado antes y después del parche):
+
+| Prueba | Qué hace | Resultado |
+|---|---|---|
+| A | `index.php` por loopback | Versión, `apache2handler`, `upload_progress=0` |
+| B | Formulario de subida con un `.txt` benigno (`curl -F` dentro de `php-lab`) | `Archivo recibido: prueba.txt`: la mitigación no rompe la subida |
+| C | `POST /decode` sin compresión, desde `py-lab` | `hola node` |
+| D | `POST /decode` con una capa `br` benigna | `400 brotli invalido` (bug de doble decodificación, §1) |
+| E | `POST` a `py-lab` con `br` benigno, desde `node-lab` | `200 hola python` |
 
 **Qué no se pudo probar:**
 
 - Que la mitigación y el parche **cierren** la vulnerabilidad: no se ejecutan PoCs.
   Lo verificado es la versión y la configuración, que es lo que indica el aviso.
-- El formulario de subida de PHP y `POST /decode` con un cuerpo Brotli benigno: la
-  guía no trae un comando para eso y los servicios no publican puertos. El healthcheck
-  solo prueba la ruta `/`.
-- Que la mitigación de PHP no rompa una funcionalidad: la app del lab no usa la barra
-  de progreso de subida; en una app real habría que revisarlo.
-- Que las imágenes de Node construidas con el `Dockerfile` de la cátedra, sin el
-  ajuste de Kaspersky, se comporten igual. En este equipo ese build falla. La
-  diferencia esperada es nula: el ajuste solo cambia en qué CA confía npm al bajar
-  `express`.
+- ~~El formulario de subida de PHP y `POST /decode` con un cuerpo Brotli benigno~~:
+  **probado el 01/11** desde dentro de `labnet` (pruebas B a E). Siguen sin probarse
+  desde fuera, porque los servicios no publican puertos y no se cambia la red.
+- Que la mitigación de PHP no rompa una funcionalidad **de una app real**: en el lab
+  la subida sigue funcionando (prueba B), pero la app no usa la barra de progreso de
+  subida; en una app que la use, desactivar `upload_progress` la rompe.
+- ~~Que las imágenes de Node construidas con el `Dockerfile` de la cátedra, sin el
+  ajuste de Kaspersky, se comporten igual~~: **probado el 01/11**. En otro equipo,
+  `parchear.sh` sin cambios construyó las dos imágenes y dio las mismas versiones y
+  resultados funcionales.
 
 ---
 
