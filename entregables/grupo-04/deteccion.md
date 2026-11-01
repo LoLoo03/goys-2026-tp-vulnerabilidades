@@ -1,6 +1,6 @@
 # Detección y caza — Grupo 04
 
-**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10) · **Fecha:** jueves 29/10/2026
+**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10), Naim Guarino (revisión y pruebas en el lab, 01/11) · **Fecha:** jueves 29/10/2026
 
 Fuente: `laboratorio/logs/audit.log` (21 líneas, 2026-10-27 09:40–09:49 UTC).
 **Alcance de la revisión local (01/11/2026):** análisis documental del log sintético
@@ -22,6 +22,24 @@ un **shell o descargador** (`sh`, `bash`, `curl`, `wget`, `nc`), a partir del 17
 (inicio de búsqueda propuesto por la cronología de la consigna, no por este log),
 y sobre todo después del 21/10, con argumentos de
 reconocimiento (`id`, `whoami`, `uname`) o URLs a IPs externas.
+
+**Desglose por host: qué esperamos ver y qué nos haría descartarla.** Una hipótesis
+de caza sirve si se puede refutar; por eso cada fila dice también qué evidencia la
+debilitaría. Los precursores salen del mecanismo descrito en
+[`recursos/contexto.md`](../../recursos/contexto.md).
+
+| Host | Padre | Hijo esperado | Desde | Evidencia esperada | La debilita |
+|---|---|---|---|---|---|
+| web01 | `apache2` | `sh`, `id`, `whoami`, `curl`, `wget` | 17/10; foco desde 21/10 08:37 UTC (primer request "parecido a PHP2Shell") | Hijo que no sea `apache2 -k start`. **Antes**, errores fatales u OOM de PHP o workers terminados por señal en `error.log`: el vector interrumpe PHP con un error fatal u OOM | Solo hijos `apache2 -k start`, recreación de workers al ritmo de la línea base y sin errores fatales en el período |
+| api01 | `node` | `sh`, `curl`, `wget`, `perl`, `node` con argumentos distintos de `server.js` | 21/10 (disclose) | Hijo que no sea `node server.js`. **Antes**, reinicios del servicio y errores `Decompression failed` de body-parser (se vio en el lab que quedan en el log del contenedor, §5) | Ningún hijo salvo `node server.js` y ningún reinicio sin causa operativa |
+| svc01 | `python` | `sh`, `uname`, `id` | Después de un acceso a web01 o api01: no recibe tráfico de Internet | Hijo que no sea `python app.py`. **Antes**, una conexión entrante desde otro servicio interno (en el lab, `py-lab` registra la IP de origen, §5) | Hijos solo `python app.py` y ninguna conexión interna fuera de lo habitual |
+| Los tres | — | — | Ventanas de minutos | Comandos cortos en lotes, como los que describe Unit 42 para post-explotación con agentes; en sus casos, con marcadores `==SHELLUSER==` / `==PASSWD==` en los argumentos | — |
+
+**Contraste con el log:** la parte de procesos se sostiene en los tres hosts (§2). Los
+precursores no se pueden contrastar porque `audit.log` no registra errores de PHP,
+reinicios ni conexiones (§5). Los marcadores de Unit 42 no aparecen
+(`grep -cE '==SHELLUSER==|==PASSWD==' audit.log` → `0`); la ausencia no descarta
+un agente, solo esa variante.
 
 ---
 
