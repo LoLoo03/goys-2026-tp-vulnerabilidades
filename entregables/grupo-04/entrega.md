@@ -7,6 +7,7 @@
 |---|---|---|
 | Lorenzo Bellomo | LoLoo03 | Inventario, cambios/parche, detección, contención/comunicación |
 | Agustin Ignacio Kloster | AgusKlos | Revisión de `entrega.md` y `deteccion.md`, preparación del comité |
+| Naim Guarino | naimguar | Re-ejecución del laboratorio (01/11): pruebas de comportamiento de contención, pruebas funcionales y revisión de `deteccion.md` |
 
 > El taller en el aula (29/10) lo ejecutó un solo integrante, Lorenzo Bellomo; por eso
 > concentra los cuatro roles, y su `informe.md` lo refleja. La revisión posterior
@@ -33,6 +34,18 @@ y **decisiones propuestas para una organización ficticia**. Los hosts del log n
 son evidencia de intrusión en los contenedores ejecutados por el grupo. Las versiones
 destino y la cronología describen el taller de octubre, no una recomendación permanente
 para cualquier instalación futura.
+
+**Re-ejecución del 01/11 (Naim Guarino).** Posterior a la revisión documental, se
+volvió a levantar el laboratorio de la cátedra en otro equipo, sin intercepción
+HTTPS, con `./scripts/arrancar-2h.sh` y `./scripts/parchear.sh` **sin
+modificaciones**. Se corrieron pruebas de comportamiento de los controles y pruebas
+funcionales con contenido benigno, antes y después del parche, siempre dentro de
+`labnet` y sin publicar puertos ni ejecutar PoCs
+([`08`](capturas/08-contencion-pruebas-antes.txt) a
+[`13`](capturas/13-memoria-tmp-capabilities.txt)). Esta evidencia es **nueva y
+posterior al taller**: se marca como tal donde se usa y no reemplaza a las capturas
+del 29/10. La única diferencia de entorno es el equipo; `php.ini` ya tenía la
+mitigación (`upload_progress = 0`) commiteada en la rama.
 
 ## 1. Inventario
 
