@@ -44,8 +44,11 @@ funcionales con contenido benigno, antes y después del parche, siempre dentro d
 ([`08`](capturas/08-contencion-pruebas-antes.txt) a
 [`13`](capturas/13-memoria-tmp-capabilities.txt)). Esta evidencia es **nueva y
 posterior al taller**: se marca como tal donde se usa y no reemplaza a las capturas
-del 29/10. La única diferencia de entorno es el equipo; `php.ini` ya tenía la
-mitigación (`upload_progress = 0`) commiteada en la rama.
+del 29/10. Diferencias de entorno declaradas: otro equipo, con Docker Desktop sobre
+**arm64** (kernel `6.10.14-linuxkit`), así que las imágenes son de otra arquitectura
+que las del taller ([`16`](capturas/16-kernel-y-arquitectura.txt)); `php.ini` ya
+tenía la mitigación (`upload_progress = 0`) commiteada en la rama. Ninguna prueba
+depende de la arquitectura, porque no se ejecutan PoCs.
 
 ## 1. Inventario
 
@@ -428,9 +431,13 @@ sin habilitar salida a Internet ni alterar la red interna del laboratorio.
 
 **Kernel del entorno Docker: alcance pendiente.** El contexto de la cátedra incluye
 PHP2Shell + Fragnesia (CVE-2026-46300), una cadena hacia privilegios elevados. No se
-relevó el kernel Linux que ejecuta los contenedores, incluida la VM del motor si
-corresponde. Su aplicabilidad es **indeterminada**: no se deduce del sistema operativo
-del equipo ni de las versiones PHP/Node. Infraestructura debe inventariar versión,
+relevó el kernel del equipo del taller (29/10). En el entorno de la re-ejecución
+(01/11) se inventarió: Docker Desktop, kernel de la VM del motor
+**`6.10.14-linuxkit`, aarch64**; los contenedores comparten ese kernel
+([`16`](capturas/16-kernel-y-arquitectura.txt)). Que haya versión no resuelve la
+aplicabilidad, que sigue **indeterminada**: no contrastamos esa versión con las
+afectadas por Fragnesia ni con las correcciones del proveedor, y no se deduce del
+sistema operativo del equipo ni de las versiones PHP/Node. Infraestructura debe inventariar versión,
 configuración y correcciones del proveedor durante la primera jornada, y seguridad
 evaluar el host antes de cerrar el riesgo. No se ejecutan PoCs ni se supone que
 este entorno esté afectado. Un usuario sin privilegios y un filesystem read-only
