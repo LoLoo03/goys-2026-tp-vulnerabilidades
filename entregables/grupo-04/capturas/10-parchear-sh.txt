@@ -1,0 +1,156 @@
+$ ./scripts/parchear.sh   # sin modificaciones, equipo sin intercepción HTTPS
+2026-11-01T17:08:50Z
+ php-lab Pulled 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.17kB done
+#1 DONE 0.0s
+
+#2 [py-lab internal] load build definition from Dockerfile
+#2 transferring dockerfile: 245B done
+#2 DONE 0.0s
+
+#3 [node-lab internal] load build definition from Dockerfile
+#3 transferring dockerfile: 227B done
+#3 DONE 0.0s
+
+#4 [node-lab internal] load metadata for docker.io/library/node:22.23.4-bookworm-slim
+#4 ...
+
+#5 [py-lab internal] load metadata for docker.io/library/python:3.11-slim
+#5 DONE 0.8s
+
+#6 [py-lab internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [py-lab internal] load build context
+#7 transferring context: 28B done
+#7 DONE 0.0s
+
+#8 [py-lab 1/4] FROM docker.io/library/python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60
+#8 resolve docker.io/library/python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60 done
+#8 DONE 0.0s
+
+#9 [py-lab 2/4] WORKDIR /app
+#9 CACHED
+
+#10 [py-lab 3/4] RUN pip install --no-cache-dir "brotli==1.2.1"
+#10 ...
+
+#4 [node-lab internal] load metadata for docker.io/library/node:22.23.4-bookworm-slim
+#4 DONE 1.7s
+
+#11 [node-lab internal] load .dockerignore
+#11 transferring context: 2B done
+#11 DONE 0.0s
+
+#12 [node-lab internal] load build context
+#12 transferring context: 63B done
+#12 DONE 0.0s
+
+#13 [node-lab 1/5] FROM docker.io/library/node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+#13 resolve docker.io/library/node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da 0.0s done
+#13 ...
+
+#10 [py-lab 3/4] RUN pip install --no-cache-dir "brotli==1.2.1"
+#10 1.555 Collecting brotli==1.2.1
+#10 2.328    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 2.9 MB/s eta 0:00:00
+#10 2.358 Installing collected packages: brotli
+#10 2.380 Successfully installed brotli-1.2.1
+#10 2.380 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#10 2.641 
+#10 2.641 [notice] A new release of pip is available: 24.0 -> 26.2.2
+#10 2.641 [notice] To update, run: pip install --upgrade pip
+#10 DONE 2.8s
+
+#14 [py-lab 4/4] COPY app.py ./
+#14 DONE 0.0s
+
+#13 [node-lab 1/5] FROM docker.io/library/node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+#13 ...
+
+#15 [py-lab] exporting to image
+#15 exporting layers 0.4s done
+#15 exporting manifest sha256:ba6cd8ea6d1d1b9e5c8170e5ed964500285cd411a87eac04d168738eb150cd04 done
+#15 exporting config sha256:18290085196457cb1630b08af383086eceee7b9d635b5afa85e0e7c9f68b7f66 done
+#15 exporting attestation manifest sha256:ee1b2d8630286d48b58af9f9d20afac39efe15923214329de5acfc6e62d1a496 done
+#15 exporting manifest list sha256:0fc8e5dafad47f433f54deff3a931af6de39570e80951ea757a9c2b60a6d4ab5 done
+#15 naming to docker.io/library/goys-vuln-lab-py:1.2.1 done
+#15 unpacking to docker.io/library/goys-vuln-lab-py:1.2.1 0.1s done
+#15 DONE 0.5s
+
+#16 [py-lab] resolving provenance for metadata file
+#16 DONE 0.0s
+
+#13 [node-lab 1/5] FROM docker.io/library/node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+#13 DONE 7.6s
+
+#17 [node-lab 2/5] WORKDIR /app
+#17 DONE 0.2s
+
+#18 [node-lab 3/5] COPY package.json ./
+#18 DONE 0.0s
+
+#19 [node-lab 4/5] RUN npm install --omit=dev
+#19 2.499 
+#19 2.499 added 65 packages, and audited 66 packages in 2s
+#19 2.499 
+#19 2.499 30 packages are looking for funding
+#19 2.499   run `npm fund` for details
+#19 2.499 
+#19 2.499 found 0 vulnerabilities
+#19 2.500 npm notice
+#19 2.500 npm notice New major version of npm available! 10.9.9 -> 12.2.1
+#19 2.500 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#19 2.500 npm notice To update run: npm install -g npm@12.2.1
+#19 2.500 npm notice
+#19 DONE 2.6s
+
+#20 [node-lab 5/5] COPY server.js ./
+#20 DONE 0.0s
+
+#21 [node-lab] exporting to image
+#21 exporting layers
+#21 exporting layers 0.3s done
+#21 exporting manifest sha256:797b6b3260e17b41b16c1c92719fe634cfc56149a838eb0fc12e8e84f3ebf9ab
+#21 exporting manifest sha256:797b6b3260e17b41b16c1c92719fe634cfc56149a838eb0fc12e8e84f3ebf9ab done
+#21 exporting config sha256:81de87c82380207a6ca75fafc9276d20bcd9f12b49b78869e3be87e0a183d581 done
+#21 exporting attestation manifest sha256:23ac2cbe479750d34e89173821978f38a14da8192479684f6643df54f7f2dbad 0.0s done
+#21 exporting manifest list sha256:1326de9d8c0f829d2980d172d5abcb4180b33af0f16512b78315696c70576f57 done
+#21 naming to docker.io/library/goys-vuln-lab-node:22.23.4-bookworm-slim done
+#21 unpacking to docker.io/library/goys-vuln-lab-node:22.23.4-bookworm-slim 0.1s done
+#21 DONE 0.4s
+
+#22 [node-lab] resolving provenance for metadata file
+#22 DONE 0.0s
+ node-lab  Built
+ py-lab  Built
+ Container py-lab  Recreate
+ Container node-lab  Recreate
+ Container php-lab  Recreate
+ Container php-lab  Recreated
+ Container py-lab  Recreated
+ Container node-lab  Recreated
+ Container php-lab  Starting
+ Container py-lab  Starting
+ Container node-lab  Starting
+ Container node-lab  Started
+ Container py-lab  Started
+ Container php-lab  Started
+
+== Versiones después del parche ==
+== PHP ==
+PHP 8.3.36 (cli) (built: Oct 28 2026 01:28:29) (NTS)
+session.upload_progress.enabled=0
+
+== Node.js ==
+v22.23.4 / brotli 1.1.0
+-- dependencias con brotli:
+   (sin paquete brotli externo: lo aporta el runtime)
+
+== Python ==
+python 3.11.18
+brotli 1.2.1
+node-lab goys-vuln-lab-node:22.23.4-bookworm-slim Up 12 seconds (healthy)
+php-lab php:8.3.36-apache Up 12 seconds (healthy)
+py-lab goys-vuln-lab-py:1.2.1 Up 12 seconds (healthy)
