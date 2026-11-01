@@ -79,3 +79,26 @@ drwxr-xr-x 1 root root 4096 Oct 21 00:33 ..
 -rw-r--r-- 1 root root    0 Nov  1 17:15 other_vhosts_access.log
 $ docker compose --env-file versions.env down -v
  Network goys-vuln-lab_labnet  Removed
+
+== Preservar los logs de Apache antes de reiniciar: ¿qué comando sirve? ==
+2026-11-01T17:17:00Z
+$ docker compose --env-file versions.env up -d --wait
+$ docker compose exec -T node-lab node -e 'fetch("http://php-lab/").then(r=>console.log("HTTP", r.status))'
+HTTP 200
+$ docker compose cp php-lab:/var/log/apache2 ./viacp && ls -la ./viacp
+total 0
+drwxrwxrwt@ 5 usuario  wheel  160 Oct 20 21:33 .
+drwxr-xr-x@ 4 usuario  wheel  128 Nov  1 14:17 ..
+lrwxr-xr-x@ 1 usuario  wheel   11 Oct 20 21:33 access.log -> /dev/stdout
+lrwxr-xr-x@ 1 usuario  wheel   11 Oct 20 21:33 error.log -> /dev/stderr
+lrwxr-xr-x@ 1 usuario  wheel   11 Oct 20 21:33 other_vhosts_access.log -> /dev/stdout
+(docker cp copia la capa de la imagen, con los enlaces a stdout/stderr: NO el contenido del tmpfs)
+
+$ docker compose exec -T php-lab tar -C /var/log -cf - apache2 > apache2.tar && tar -tvf apache2.tar
+drwxrwxrwt  0 root   root        0 Nov  1 14:17 apache2/
+-rw-r--r--  0 root   root      423 Nov  1 14:17 apache2/error.log
+-rw-r--r--  0 root   root        0 Nov  1 14:17 apache2/other_vhosts_access.log
+-rw-r--r--  0 root   root       81 Nov  1 14:17 apache2/access.log
+(exec + tar sí copia el contenido real: access.log con 81 bytes)
+
+$ docker compose --env-file versions.env down -v
