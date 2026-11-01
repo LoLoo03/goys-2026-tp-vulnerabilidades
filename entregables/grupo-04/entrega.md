@@ -74,15 +74,30 @@ dejamos el comando que lo haría, sin ejecutar.
 **Dónde se decodifica Brotli en la API.** `server.js` usa `express.raw()` en
 `POST /decode`. En Express 5, `express.raw` es body-parser 2, que por defecto
 (`inflate: true`) **ya descomprime** los cuerpos con `Content-Encoding: br` antes de
-que corra el handler (`recursos/contexto.md`, "Cómo llega al decoder"). Esto sale de
-leer el código y la documentación; no se probó en el laboratorio. Consecuencias:
+que corra el handler (`recursos/contexto.md`, "Cómo llega al decoder"). En la
+revisión del 30/10 esto era una deducción del código; el 01/11 se **probó** con
+cuerpos benignos ([`09-funcional-antes.txt`](capturas/09-funcional-antes.txt),
+pruebas D, F e I; body-parser 2.4.0). Consecuencias:
 
 - El decoder vulnerable se alcanza en body-parser aunque el handler no hiciera nada
   con Brotli. Sacar `brotliDecompressSync` del handler no saca a la API del alcance.
-- El handler vuelve a decodificar un cuerpo que ya llega descomprimido, así que un
-  `POST /decode` legítimo con `br` probablemente responda `400 brotli invalido`. Es
-  un bug funcional, ajeno al CVE, que solo aparecería con una prueba funcional con
-  un cuerpo Brotli benigno (ver "Qué no se pudo probar").
+- **Doble decodificación, verificada:** un cuerpo `brotli(brotli("hola node"))` con
+  `Content-Encoding: br` devuelve `200 hola node` (prueba F). Body-parser quita una
+  capa y el handler la otra: los datos del cliente pasan **dos veces** por el
+  decoder. Un `POST /decode` legítimo con una sola capa `br` responde
+  `400 brotli invalido` (prueba D): es un bug funcional, ajeno al CVE.
+- **La respuesta de error delata el decoder:** un cuerpo que no es Brotli con
+  `Content-Encoding: br` devuelve `400` con el stack trace de Express
+  (`Error: Decompression failed … BrotliDecoder.zlibOnError`) porque `NODE_ENV` no
+  está definido (prueba I). Le confirma a un tercero, sin autenticarse, que su
+  contenido llega al decoder Brotli del runtime: es justo el dato que necesita para
+  apuntar Node2Shell. Corrección propuesta, no aplicada al lab: `NODE_ENV=production`
+  o un manejador de errores propio que no devuelva la traza.
+- **Matiz:** body-parser solo lee el cuerpo si la petición trae `Content-Type`
+  (con `type: '*/*'`, `type-is` exige que el encabezado exista). Sin
+  `Content-Type`, el cuerpo no se decodifica en body-parser y `server.js` responde
+  `400` porque `req.body` llega `undefined` (prueba H). No es una defensa: el
+  atacante elige los encabezados.
 
 **Supuestos de exposición:**
 
@@ -353,7 +368,7 @@ Evidencia: [`capturas/03-contencion-antes.txt`](capturas/03-contencion-antes.txt
 | Filesystem read-only | `read_only: true` + `tmpfs` solo en `/tmp` (y rutas de Apache) | `read_only: true` en los 3 servicios en `docker compose config`; código de PHP montado `:ro` | **Sí** (declarado) | Reduce escrituras en la raíz de solo lectura; no impide ejecución en memoria ni abuso de rutas escribibles o servicios externos. `tmpfs` no persiste al recrear el contenedor |
 | Capabilities mínimas | `cap_drop: ALL`; PHP recupera solo `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `NET_BIND_SERVICE`; `no-new-privileges:true` | `docker compose config` | **Sí** (declarado) | Sin capacidades de red cruda, montaje ni administración; `no-new-privileges` bloquea escalar con binarios setuid |
 | Límites de memoria/PIDs | `mem_limit` 256 MB (PHP, Node) / 128 MB (Python); `pids_limit` 100 / 100 / 50 | `docker compose config` | **Sí** (declarado) | Acota minería, fork bombs y que un contenedor comprometido tumbe al host |
-| Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js`: `express.raw()` con `inflate` por defecto (`true`) | **No** | Control propuesto mientras no se parchee: rechazar `br` en el proxy, o en la app con `express.raw({ inflate: false })`, que hace que body-parser responda 415 a cuerpos comprimidos **antes** de tocar el decoder. Un filtro dentro del handler llegaría tarde. Corta el camino de entrada de Node2Shell; costo: `/decode` deja de aceptar Brotli, así que es temporal |
+| Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js`: `express.raw()` con `inflate` por defecto (`true`). Prueba del control propuesto en una app temporal dentro de `node-lab`, sin tocar `server.js` ([`09`](capturas/09-funcional-antes.txt), prueba G) | **No** en el lab / **Probado** como propuesta | Control propuesto mientras no se parchee: rechazar `br` en el proxy, o en la app con `express.raw({ inflate: false })`. Probado: con `Content-Type` el cuerpo `br` recibe **415** `content encoding unsupported` **antes** del decoder; sin `Content-Type`, body-parser no lee el cuerpo y el handler recibe `undefined`. En ningún caso los bytes llegan al decoder de body-parser. Además hay que **quitar** el `brotliDecompressSync` del handler, que es un segundo camino al decoder. Un filtro dentro del handler llegaría tarde. Costo: `/decode` deja de aceptar Brotli, así que es temporal |
 
 **Prueba de salida a Internet:** las capturas anteriores y posteriores al parche
 muestran PHP `SIN SALIDA`, Node `SIN SALIDA TypeError` y Python `SIN SALIDA URLError`.
