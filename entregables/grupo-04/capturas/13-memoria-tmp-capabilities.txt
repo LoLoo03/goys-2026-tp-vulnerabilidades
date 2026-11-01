@@ -1,0 +1,43 @@
+2026-11-01T17:10:08Z
+== 9. Límite de memoria efectivo: mem_limit sin memswap_limit ==
+$ docker inspect py-lab --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}}'
+Memory=134217728 MemorySwap=268435456
+[exit 0]
+
+$ docker compose exec -T py-lab cat /sys/fs/cgroup/memory.swap.max
+134217728
+[exit 0]
+
+$ docker compose exec -T py-lab python -c 'b = b"x" * (300*1024*1024); print("RESERVO", len(b))'
+[exit 137]
+
+$ docker compose exec -T py-lab grep -E '^oom' /sys/fs/cgroup/memory.events
+oom 1
+oom_kill 1
+oom_group_kill 0
+[exit 0]
+
+$ docker compose ps --format '{{.Name}} {{.Status}}' py-lab
+py-lab Up 34 seconds (healthy)
+[exit 0]
+
+== 10. /tmp es noexec: un binario copiado ahí no se ejecuta directamente ==
+$ docker compose exec -T node-lab sh -c 'cp /usr/bin/id /tmp/id && /tmp/id'
+sh: 1: /tmp/id: Permission denied
+[exit 126]
+
+-- residual: un script en /tmp sí corre si se lo pasa a un intérprete
+$ docker compose exec -T node-lab sh -c 'echo id > /tmp/s.sh && sh /tmp/s.sh'
+uid=1000(node) gid=1000(node) groups=1000(node)
+[exit 0]
+
+== 11. PHP: capabilities por proceso apache2 ==
+$ docker compose exec -T php-lab sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = apache2 ] || continue; echo "pid=${p#/proc/} uid=$(awk "/^Uid/{print \$2}" $p/status) $(grep CapEff $p/status)"; done'
+pid=1 uid=0 CapEff:	00000000000004c3
+pid=17 uid=33 CapEff:	0000000000000000
+pid=18 uid=33 CapEff:	0000000000000000
+pid=19 uid=33 CapEff:	0000000000000000
+pid=20 uid=33 CapEff:	0000000000000000
+pid=21 uid=33 CapEff:	0000000000000000
+[exit 0]
+
