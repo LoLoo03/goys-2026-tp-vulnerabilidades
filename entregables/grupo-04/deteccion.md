@@ -257,6 +257,30 @@ ruta y argumentos, no por nombre.
 - **Log sintético:** es un ejercicio; las IPs son de un rango de documentación y los
   PIDs no corresponden al laboratorio que levantamos.
 
+**Las fuentes que faltan, ¿existen en el lab?** Se revisaron el 01/11 los logs de
+cada servicio ([`capturas/15`](capturas/15-logs-de-servicio.txt)):
+
+| Servicio | ¿Registra pedidos? | ¿IP de origen? | ¿Sobrevive a un reinicio? |
+|---|---|---|---|
+| `py-lab` (svc01) | Sí, en `docker compose logs` | **Sí**: `172.27.0.3 - "GET / HTTP/1.1" 200` (la IP de `node-lab`) | Sí, mientras exista el contenedor |
+| `node-lab` (api01) | No: `server.js` no tiene log de accesos; solo quedan los errores, con stack trace | No | Sí, mientras exista el contenedor |
+| `php-lab` (web01) | Sí, en `/var/log/apache2/access.log`, **pero no** en `docker compose logs` | Sí | **No** |
+
+El caso de PHP es el más delicado. La imagen oficial enlaza `access.log` y `error.log`
+a stdout/stderr, pero el compose monta un `tmpfs` en `/var/log/apache2` que tapa esos
+enlaces. Resultado medido: el acceso desde `node-lab` quedó en `access.log` (81 bytes)
+y no en los logs de Docker; después de `docker compose restart php-lab`, `access.log`
+quedó en **0 bytes**. Es decir, la fuente principal para correlacionar PHP2Shell
+(pedidos y errores fatales de PHP) es volátil, y el reinicio que pide la mitigación
+de `upload_progress` la borra. En un incidente real hay que **copiar esos logs antes
+de reiniciar** (`docker compose cp php-lab:/var/log/apache2 <destino>`) y, en
+producción, enviarlos a un colector externo. No se modifica el compose del lab.
+
+Para svc01 esto cambia lo que se puede afirmar: la conexión entrante desde otro
+servicio, que es lo que sostendría la hipótesis de movimiento lateral, **sí** quedaría
+registrada en un despliegue como el del lab. `audit.log` no la trae porque solo
+registra procesos.
+
 **Criterio de cierre:** una descarga fallida, un healthcheck correcto o la ausencia
 de coincidencias no descartan ejecución previa ni acceso a datos. Para cerrar se
 requieren cobertura suficiente, explicación de las acciones, búsqueda de

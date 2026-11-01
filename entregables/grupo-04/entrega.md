@@ -366,6 +366,14 @@ resultado del comando; cubre solo 9 minutos del 27/10 (nada desde el 17/10, cuan
 empezaron los intentos); no hay telemetría de red para ver si la salida a
 `198.51.100.x` funcionó.
 
+**Logs de los servicios del lab (01/11):** el access log de Apache queda en un
+`tmpfs` que no llega a `docker compose logs` y **se borra al reiniciar** `php-lab`
+(medido: 81 bytes → 0). El `docker compose restart php-lab` de la mitigación del
+29/10 habría borrado esa evidencia: antes de reiniciar un servicio sospechoso hay
+que copiar sus logs. Node no registra accesos; Python sí registra la IP de origen
+([`deteccion.md`](deteccion.md) §5,
+[`capturas/15`](capturas/15-logs-de-servicio.txt)).
+
 **Árbol de procesos capturado al cierre del taller:** sin hijos sospechosos. En `node-lab` aparece
 `node -e fetch(...)`, pero es el healthcheck de Docker: su padre es el runtime del
 contenedor, no `node server.js`, así que la regla no lo dispara
