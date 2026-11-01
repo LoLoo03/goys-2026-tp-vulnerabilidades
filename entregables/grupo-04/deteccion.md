@@ -180,6 +180,41 @@ no captura real de `execve`, entrega de alertas ni aislamiento automático. Ante
 desplegar una respuesta automática se requieren pruebas de falsos positivos,
 aprobación del responsable y un procedimiento de recuperación.
 
+**Por qué comparar campos y no hacer `grep` sobre la línea entera.** El filtro de
+`detectar.sh` busca `comm=(sh|bash|…)` sin anclar y sobre toda la línea, que incluye
+`args`, el único campo que controla el atacante. Con una línea de ejemplo
+(no está en `audit.log`):
+
+```text
+2026-10-27T09:50:00Z host=web01 ppid=700 ppid_comm=cron pid=701 comm=sha256sum args="sha256sum /tmp/ppid_comm=python"
+```
+
+el `grep` de `detectar.sh` la marca: `comm=sh` coincide con el prefijo de
+`sha256sum` y `ppid_comm=python` coincide **dentro de los argumentos**, aunque el
+padre real es `cron`. Es un falso positivo, y la misma técnica permite meter texto
+en `args` para confundir a quien lea el resultado. La regla de arriba compara campos
+fijos (`$4`, `$6`) con anclas `^…$` y no cae. Sobre el `audit.log` real los dos dan
+lo mismo (líneas 6, 9, 14 y 16 con la lista de `detectar.sh`), así que la diferencia
+no cambia los hallazgos, pero sí la confianza en la regla.
+
+**Qué aporta el lab sobre la regla** (evidencia del 01/11, no del log):
+
+- La imagen de `node-lab` trae `sh`, `bash` y `perl`, pero **no** `curl`, `wget` ni `nc`
+  ([`capturas/08`](capturas/08-contencion-pruebas-antes.txt) §8). En una imagen así la
+  cadena de la línea 9 fallaría en `curl`, pero `sh` se habría ejecutado igual: la
+  regla dispara por el primer salto, aunque el descargador no exista. Un atacante
+  que lo sepa usaría `fetch` desde el propio proceso o `perl`; `perl` está en la
+  lista, `fetch` es el falso negativo de memoria.
+- **Señal complementaria sin `execve`:** un cuerpo que no es Brotli con
+  `Content-Encoding: br` deja en `docker compose logs node-lab` un
+  `Error: Decompression failed … BrotliDecoder.zlibOnError` con
+  `code: 'ERR__ERROR_FORMAT_PADDING_1'`
+  ([`capturas/15`](capturas/15-logs-de-servicio.txt)). Una ráfaga de esos errores
+  indica que alguien está probando entradas contra el decoder, que es lo previo a
+  Node2Shell. Cubre en parte el falso negativo "payload en memoria", porque no
+  depende de que se cree un proceso. Límite: el error no trae la IP de origen ni la
+  ruta, porque `server.js` no tiene log de accesos.
+
 **Por qué sin excepciones:** `server.js` solo responde JSON y descomprime Brotli; no
 usa `child_process`. Cualquier hijo distinto de `node server.js` es anómalo. Si en
 el futuro la app necesitara lanzar procesos, se agrega una excepción explícita por
