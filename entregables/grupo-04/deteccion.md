@@ -110,6 +110,22 @@ reciclado programado o administración legítima.
 aplicación e identidad de instancia. Alertar por un aumento de terminaciones
 anómalas respecto de la línea base; un crash aislado no demuestra un ataque.
 
+### 2.3. `apache2` → `wget` sin shell intermedio (línea 14)
+
+Tres de los cuatro hallazgos pasan por `sh -c` (líneas 6, 9 y 16), que es lo que
+hacen `system()`/`exec()` en PHP, `child_process.exec` en Node y
+`os.system`/`subprocess(shell=True)` en Python. La línea 14 no: `apache2` lanza
+`wget` directamente. Eso es compatible con una ejecución que no pasa por el shell
+(por ejemplo `proc_open` con el comando como arreglo, disponible desde PHP 7.4, o
+`pcntl_exec`), con un cambio de técnica entre 09:42 y 09:44, o con un registro
+incompleto. El log no permite elegir entre esas opciones.
+
+Consecuencia para la detección: una regla que exija `sh` como hijo directo del
+servicio **pierde** esta línea. Por eso la lista de hijos tiene que incluir los
+descargadores como hijos directos, como ya hacen `detectar.sh` y la regla de §4.
+Como dato del lab, no del log: la imagen `php:8.3.35-apache` no trae `wget`, pero sí
+`curl` ([`capturas/08`](capturas/08-contencion-pruebas-antes.txt) §8).
+
 ---
 
 ## 3. Falsos positivos
