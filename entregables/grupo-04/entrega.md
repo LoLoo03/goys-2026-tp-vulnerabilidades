@@ -382,10 +382,11 @@ Evidencia: [`capturas/03-contencion-antes.txt`](capturas/03-contencion-antes.txt
 | Control | Configuración | Evidencia | ¿Funciona? | Qué daño evita |
 |---------|---------------|-----------|:----------:|----------------|
 | Red sin salida | `networks.labnet.internal: true`, sin `ports:` | `SIN SALIDA` en PHP, Node (`TypeError`) y Python (`URLError`), antes y después del parche | Configurado; pruebas de salida sin respuesta exitosa | Busca limitar descargas, exfiltración y comunicación externa; las pruebas no acreditan bloqueo de todo destino o protocolo |
-| Usuario sin privilegios | `user: node` (Node), `user: nobody` (Python); Apache: master `root`, workers `www-data` | `docker top`: `node` con UID 1000, `python` como `nobody`, workers `apache2` como `www-data` | **Sí** (Node, Python) / Parcial (PHP) | Reduce privilegios, pero un RCE aún puede acceder a datos y credenciales legibles por la cuenta del servicio. En PHP el master sigue siendo root |
-| Filesystem read-only | `read_only: true` + `tmpfs` solo en `/tmp` (y rutas de Apache) | `read_only: true` en los 3 servicios en `docker compose config`; código de PHP montado `:ro` | **Sí** (declarado) | Reduce escrituras en la raíz de solo lectura; no impide ejecución en memoria ni abuso de rutas escribibles o servicios externos. `tmpfs` no persiste al recrear el contenedor |
-| Capabilities mínimas | `cap_drop: ALL`; PHP recupera solo `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `NET_BIND_SERVICE`; `no-new-privileges:true` | `docker compose config` | **Sí** (declarado) | Sin capacidades de red cruda, montaje ni administración; `no-new-privileges` bloquea escalar con binarios setuid |
-| Límites de memoria/PIDs | `mem_limit` 256 MB (PHP, Node) / 128 MB (Python); `pids_limit` 100 / 100 / 50 | `docker compose config` | **Sí** (declarado) | Acota minería, fork bombs y que un contenedor comprometido tumbe al host |
+| Usuario sin privilegios | `user: node` (Node), `user: nobody` (Python); Apache: master `root`, workers `www-data` | 29/10: `docker top`. 01/11: `id` → `uid=1000(node)`, `uid=65534(nobody)`; en PHP, `/proc/*/status` muestra el master con UID 0 y los 5 workers con UID 33 ([`08`](capturas/08-contencion-pruebas-antes.txt) §1, [`13`](capturas/13-memoria-tmp-capabilities.txt) §11) | **Sí, probado** (Node, Python) / Parcial (PHP) | Reduce privilegios, pero un RCE aún puede acceder a datos y credenciales legibles por la cuenta del servicio. En PHP las peticiones las atiende un worker `www-data`; el master root no procesa contenido de clientes, pero existe |
+| Filesystem read-only | `read_only: true` + `tmpfs` en `/tmp` (y rutas de Apache) | 01/11: escribir en `/var/www/html`, `/usr/local/bin`, `/app` falla en los 3 (`Read-only file system`, `EROFS`); `/tmp` es escribible pero montado **`noexec`**: un binario copiado ahí da `Permission denied` ([`08`](capturas/08-contencion-pruebas-antes.txt) §2, [`13`](capturas/13-memoria-tmp-capabilities.txt) §10) | **Sí, probado** | Impide dejar una webshell en el código o reemplazar binarios, y que un binario descargado se ejecute desde `/tmp`. **Residual medido:** `sh /tmp/s.sh` sí corre (el intérprete no está en `/tmp`), y la ejecución en memoria no se ve afectada. `tmpfs` no persiste al recrear el contenedor |
+| Capabilities mínimas | `cap_drop: ALL`; PHP recupera solo `CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE`, `NET_BIND_SERVICE`; `no-new-privileges:true` | 01/11: `/proc/self/status` → Node y Python `CapEff 0`, `CapBnd 0`; PHP master `CapEff 0x4c3` (exactamente esas 5) y workers `CapEff 0`; `NoNewPrivs: 1` en los 3 ([`08`](capturas/08-contencion-pruebas-antes.txt) §3, [`13`](capturas/13-memoria-tmp-capabilities.txt) §11) | **Sí, probado** | Sin capacidades de red cruda, montaje ni administración; `no-new-privileges` bloquea escalar con binarios setuid. Un RCE en un worker PHP no hereda las 5 capabilities del master |
+| Límite de PIDs | `pids_limit` 100 / 100 / 50 | 01/11: en `py-lab` (límite 50) se lanzaron 60 `sleep`; el proceso 49 falló con `BlockingIOError: Resource temporarily unavailable` y el servicio siguió `healthy` ([`08`](capturas/08-contencion-pruebas-antes.txt) §4) | **Sí, probado** | Corta un fork bomb o un reparto masivo de procesos sin tumbar al host |
+| Límite de memoria | `mem_limit` 256 MB (PHP, Node) / 128 MB (Python), **sin** `memswap_limit` | 01/11: en `py-lab` una reserva de **200 MB funcionó** pese al límite de 128 MB; una de 300 MB terminó con `exit 137` (`oom_kill 1`) y el servicio siguió `healthy`. `docker inspect`: `MemorySwap=268435456`; `memory.swap.max` = 128 MB ([`08`](capturas/08-contencion-pruebas-antes.txt) §5, [`13`](capturas/13-memoria-tmp-capabilities.txt) §9) | **Parcial, probado** | Acota minería y agotamiento de memoria, pero el tope real es **el doble** del declarado: sin `memswap_limit`, Docker suma la misma cantidad de swap. Corrección propuesta para producción: `memswap_limit` igual a `mem_limit`. No se cambia el compose del lab |
 | Rechazo de Brotli innecesario | No configurado: `POST /decode` acepta `Content-Encoding: br` | `node/server.js`: `express.raw()` con `inflate` por defecto (`true`). Prueba del control propuesto en una app temporal dentro de `node-lab`, sin tocar `server.js` ([`09`](capturas/09-funcional-antes.txt), prueba G) | **No** en el lab / **Probado** como propuesta | Control propuesto mientras no se parchee: rechazar `br` en el proxy, o en la app con `express.raw({ inflate: false })`. Probado: con `Content-Type` el cuerpo `br` recibe **415** `content encoding unsupported` **antes** del decoder; sin `Content-Type`, body-parser no lee el cuerpo y el handler recibe `undefined`. En ningún caso los bytes llegan al decoder de body-parser. Además hay que **quitar** el `brotliDecompressSync` del handler, que es un segundo camino al decoder. Un filtro dentro del handler llegaría tarde. Costo: `/decode` deja de aceptar Brotli, así que es temporal |
 
 **Prueba de salida a Internet:** las capturas anteriores y posteriores al parche
@@ -399,13 +400,23 @@ sin habilitar salida a Internet ni alterar la red interna del laboratorio.
 
 **Riesgo residual y límites de lo verificado:**
 
-- `read_only`, capabilities y límites están **verificados en la configuración**
-  (`docker compose config`), no con una prueba que intente escribir o agotar memoria:
-  la guía no trae ese comando.
-- La red interna corta la salida, pero **no** el movimiento lateral entre los tres
-  servicios dentro de `labnet` (svc01 motiva esa hipótesis; el log no demuestra la ruta usada).
-- El master de Apache corre como root y PHP conserva 5 capabilities: tiene
-  mayor superficie de privilegios; el log sintético no mide ataques sobre ese contenedor.
+- Hasta el 30/10, `read_only`, capabilities y límites estaban verificados solo en la
+  configuración. El 01/11 se probaron por comportamiento (tabla anterior), antes y
+  después del parche con el mismo resultado ([`08`](capturas/08-contencion-pruebas-antes.txt)
+  y [`12`](capturas/12-contencion-pruebas-despues.txt)). La prueba de memoria mostró que
+  la configuración **no** hace lo que parece: el tope es 256 MB, no 128 MB.
+- **Movimiento lateral, medido:** la red interna corta la salida, pero desde `py-lab`
+  se obtuvo la respuesta de `http://node-lab:3000/` y desde `node-lab`, `HTTP 200` de
+  `http://php-lab/` ([`08`](capturas/08-contencion-pruebas-antes.txt) §7). Cualquier
+  servicio comprometido llega a los otros dos. Es la ruta que haría falta para la
+  hipótesis de svc01; el log no demuestra que se haya usado.
+- **Herramientas disponibles para un atacante, medidas:** las tres imágenes traen
+  `sh`, `bash` y `perl`; `php-lab` además trae `curl`; ninguna trae `wget` ni `nc`
+  ([`08`](capturas/08-contencion-pruebas-antes.txt) §8). Imágenes mínimas (sin shell)
+  harían fallar la cadena `servicio → sh → descargador`; no se proponen para el lab.
+- El master de Apache corre como root con 5 capabilities. Los workers que procesan
+  las peticiones no las tienen (probado), pero un escape del worker al master tendría
+  más superficie; el log sintético no mide ataques sobre ese contenedor.
 
 **Kernel del entorno Docker: alcance pendiente.** El contexto de la cátedra incluye
 PHP2Shell + Fragnesia (CVE-2026-46300), una cadena hacia privilegios elevados. No se
@@ -477,7 +488,7 @@ relevamiento del kernel antes de dar el riesgo por cerrado.
 - [x] Matriz con decisión y plazo.
 - [x] Parche aplicado y verificado; reversión documentada.
 - [x] Controles de contención documentados con su alcance de verificación (§5).
-- [ ] Pruebas de comportamiento de al menos tres controles: la configuración inspeccionada no sustituye esas pruebas; no se realizaron en esta revisión.
+- [x] Pruebas de comportamiento de al menos tres controles: read-only, usuario, capabilities, PIDs y memoria, el 01/11 (§5), posteriores al taller.
 - [x] `deteccion.md` completo.
 - [x] `informe.md` de Lorenzo existente; no acredita la entrega individual de los demás integrantes.
 - [x] Sin claves, tokens ni placeholders.
