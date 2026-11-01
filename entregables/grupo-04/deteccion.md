@@ -273,8 +273,16 @@ y no en los logs de Docker; después de `docker compose restart php-lab`, `acces
 quedó en **0 bytes**. Es decir, la fuente principal para correlacionar PHP2Shell
 (pedidos y errores fatales de PHP) es volátil, y el reinicio que pide la mitigación
 de `upload_progress` la borra. En un incidente real hay que **copiar esos logs antes
-de reiniciar** (`docker compose cp php-lab:/var/log/apache2 <destino>`) y, en
-producción, enviarlos a un colector externo. No se modifica el compose del lab.
+de reiniciar** y, en producción, enviarlos a un colector externo. No se modifica el
+compose del lab.
+
+Cuidado con el comando obvio: `docker compose cp php-lab:/var/log/apache2 <destino>`
+termina sin error, pero copia la capa de la imagen (los enlaces a `/dev/stdout` y
+`/dev/stderr`), **no** el contenido del `tmpfs`. Lo que sí funciona, probado:
+
+```bash
+docker compose exec -T php-lab tar -C /var/log -cf - apache2 > apache2-logs.tar
+```
 
 Para svc01 esto cambia lo que se puede afirmar: la conexión entrante desde otro
 servicio, que es lo que sostendría la hipótesis de movimiento lateral, **sí** quedaría
