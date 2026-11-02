@@ -1,0 +1,104 @@
+2026-11-01T17:14:57Z
+$ docker compose --env-file versions.env up -d --wait
+ Container node-lab  Healthy
+ Container php-lab  Healthy
+ Container py-lab  Healthy
+
+-- 1. desde py-lab: un cuerpo que no es Brotli con Content-Encoding: br hacia node-lab
+$ docker compose exec -T py-lab python -c '...urlopen(Request("http://node-lab:3000/decode", data=b"esto no es brotli", headers={"Content-Encoding": "br"}))...'
+HTTP 400
+
+-- 2. desde node-lab: un GET a py-lab
+$ docker compose exec -T node-lab node -e 'fetch("http://py-lab:8000/").then(r=>console.log("HTTP", r.status))'
+HTTP 200
+
+-- 3. IPs de los contenedores en labnet
+$ docker inspect -f '{{.Name}} {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' php-lab node-lab py-lab
+/php-lab 172.27.0.4
+/node-lab 172.27.0.3
+/py-lab 172.27.0.2
+
+-- 4. qué quedó en los logs de cada servicio
+$ docker compose logs --no-log-prefix node-lab | grep -v '127.0.0.1'
+node-lab escuchando en 3000
+Error: Decompression failed
+    at genericNodeError (node:internal/errors:983:15)
+    at wrappedFn (node:internal/errors:537:14)
+    at BrotliDecoder.zlibOnError [as onerror] (node:zlib:191:17) {
+  errno: -14,
+  code: 'ERR__ERROR_FORMAT_PADDING_1',
+  expose: true,
+  statusCode: 400,
+  status: 400
+}
+
+$ docker compose logs --no-log-prefix py-lab | grep -v '127.0.0.1'
+py-lab escuchando en 8000
+172.27.0.3 - "GET / HTTP/1.1" 200 -
+
+$ docker compose logs --no-log-prefix php-lab | grep -v '127.0.0.1'
+AH00558: apache2: Could not reliably determine the server's fully qualified domain name, using 172.27.0.4. Set the 'ServerName' directive globally to suppress this message
+
+$ docker compose --env-file versions.env down -v
+ Network goys-vuln-lab_labnet  Removed
+
+== Apache: ¿dónde quedan access.log y error.log? ==
+2026-11-01T17:15:30Z
+$ docker compose --env-file versions.env up -d --wait
+ Container php-lab  Healthy
+ Container py-lab  Healthy
+ Container node-lab  Healthy
+$ docker compose exec -T node-lab node -e 'fetch("http://php-lab/").then(r=>console.log("HTTP", r.status))'
+HTTP 200
+$ docker compose logs --no-log-prefix php-lab | grep -c "GET / "
+0
+$ docker compose exec -T php-lab ls -la /var/log/apache2
+total 12
+drwxrwxrwt 2 root root  100 Nov  1 17:15 .
+drwxr-xr-x 1 root root 4096 Oct 21 00:33 ..
+-rw-r--r-- 1 root root   81 Nov  1 17:15 access.log
+-rw-r--r-- 1 root root  423 Nov  1 17:15 error.log
+-rw-r--r-- 1 root root    0 Nov  1 17:15 other_vhosts_access.log
+$ docker compose exec -T php-lab sh -c "mount | grep apache2"
+tmpfs on /var/log/apache2 type tmpfs (rw,nosuid,nodev,noexec,relatime)
+$ docker compose exec -T php-lab tail -2 /var/log/apache2/access.log
+172.27.0.3 - - [01/Nov/2026:17:15:36 +0000] "GET / HTTP/1.1" 200 1027 "-" "node"
+$ docker run --rm --entrypoint ls php:8.3.35-apache -la /var/log/apache2   # la imagen sin el tmpfs del compose
+total 8
+drwxrwxrwt 2 www-data www-data 4096 Oct 21 00:33 .
+drwxr-xr-x 1 root     root     4096 Oct 21 00:33 ..
+lrwxrwxrwx 1 www-data www-data   11 Oct 21 00:33 access.log -> /dev/stdout
+lrwxrwxrwx 1 www-data www-data   11 Oct 21 00:33 error.log -> /dev/stderr
+lrwxrwxrwx 1 www-data www-data   11 Oct 21 00:33 other_vhosts_access.log -> /dev/stdout
+$ docker compose restart php-lab && docker compose exec -T php-lab ls -la /var/log/apache2
+total 8
+drwxrwxrwt 2 root root  100 Nov  1 17:15 .
+drwxr-xr-x 1 root root 4096 Oct 21 00:33 ..
+-rw-r--r-- 1 root root    0 Nov  1 17:15 access.log
+-rw-r--r-- 1 root root  423 Nov  1 17:15 error.log
+-rw-r--r-- 1 root root    0 Nov  1 17:15 other_vhosts_access.log
+$ docker compose --env-file versions.env down -v
+ Network goys-vuln-lab_labnet  Removed
+
+== Preservar los logs de Apache antes de reiniciar: ¿qué comando sirve? ==
+2026-11-01T17:17:00Z
+$ docker compose --env-file versions.env up -d --wait
+$ docker compose exec -T node-lab node -e 'fetch("http://php-lab/").then(r=>console.log("HTTP", r.status))'
+HTTP 200
+$ docker compose cp php-lab:/var/log/apache2 ./viacp && ls -la ./viacp
+total 0
+drwxrwxrwt@ 5 usuario  wheel  160 Oct 20 21:33 .
+drwxr-xr-x@ 4 usuario  wheel  128 Nov  1 14:17 ..
+lrwxr-xr-x@ 1 usuario  wheel   11 Oct 20 21:33 access.log -> /dev/stdout
+lrwxr-xr-x@ 1 usuario  wheel   11 Oct 20 21:33 error.log -> /dev/stderr
+lrwxr-xr-x@ 1 usuario  wheel   11 Oct 20 21:33 other_vhosts_access.log -> /dev/stdout
+(docker cp copia la capa de la imagen, con los enlaces a stdout/stderr: NO el contenido del tmpfs)
+
+$ docker compose exec -T php-lab tar -C /var/log -cf - apache2 > apache2.tar && tar -tvf apache2.tar
+drwxrwxrwt  0 root   root        0 Nov  1 14:17 apache2/
+-rw-r--r--  0 root   root      423 Nov  1 14:17 apache2/error.log
+-rw-r--r--  0 root   root        0 Nov  1 14:17 apache2/other_vhosts_access.log
+-rw-r--r--  0 root   root       81 Nov  1 14:17 apache2/access.log
+(exec + tar sí copia el contenido real: access.log con 81 bytes)
+
+$ docker compose --env-file versions.env down -v

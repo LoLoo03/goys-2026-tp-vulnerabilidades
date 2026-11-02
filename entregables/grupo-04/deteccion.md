@@ -1,6 +1,6 @@
 # Detección y caza — Grupo 04
 
-**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10) · **Fecha:** jueves 29/10/2026
+**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10), Naim Guarino (revisión y pruebas en el lab, 01/11) · **Fecha:** jueves 29/10/2026
 
 Fuente: `laboratorio/logs/audit.log` (21 líneas, 2026-10-27 09:40–09:49 UTC).
 **Alcance de la revisión local (01/11/2026):** análisis documental del log sintético
@@ -22,6 +22,24 @@ un **shell o descargador** (`sh`, `bash`, `curl`, `wget`, `nc`), a partir del 17
 (inicio de búsqueda propuesto por la cronología de la consigna, no por este log),
 y sobre todo después del 21/10, con argumentos de
 reconocimiento (`id`, `whoami`, `uname`) o URLs a IPs externas.
+
+**Desglose por host: qué esperamos ver y qué nos haría descartarla.** Una hipótesis
+de caza sirve si se puede refutar; por eso cada fila dice también qué evidencia la
+debilitaría. Los precursores salen del mecanismo descrito en
+[`recursos/contexto.md`](../../recursos/contexto.md).
+
+| Host | Padre | Hijo esperado | Desde | Evidencia esperada | La debilita |
+|---|---|---|---|---|---|
+| web01 | `apache2` | `sh`, `id`, `whoami`, `curl`, `wget` | 17/10; foco desde 21/10 08:37 UTC (primer request "parecido a PHP2Shell") | Hijo que no sea `apache2 -k start`. **Antes**, errores fatales u OOM de PHP o workers terminados por señal en `error.log`: el vector interrumpe PHP con un error fatal u OOM | Solo hijos `apache2 -k start`, recreación de workers al ritmo de la línea base y sin errores fatales en el período |
+| api01 | `node` | `sh`, `curl`, `wget`, `perl`, `node` con argumentos distintos de `server.js` | 21/10 (disclose) | Hijo que no sea `node server.js`. **Antes**, reinicios del servicio y errores `Decompression failed` de body-parser (se vio en el lab que quedan en el log del contenedor, §5) | Ningún hijo salvo `node server.js` y ningún reinicio sin causa operativa |
+| svc01 | `python` | `sh`, `uname`, `id` | Después de un acceso a web01 o api01: no recibe tráfico de Internet | Hijo que no sea `python app.py`. **Antes**, una conexión entrante desde otro servicio interno (en el lab, `py-lab` registra la IP de origen, §5) | Hijos solo `python app.py` y ninguna conexión interna fuera de lo habitual |
+| Los tres | — | — | Ventanas de minutos | Comandos cortos en lotes, como los que describe Unit 42 para post-explotación con agentes; en sus casos, con marcadores `==SHELLUSER==` / `==PASSWD==` en los argumentos | — |
+
+**Contraste con el log:** la parte de procesos se sostiene en los tres hosts (§2). Los
+precursores no se pueden contrastar porque `audit.log` no registra errores de PHP,
+reinicios ni conexiones (§5). Los marcadores de Unit 42 no aparecen
+(`grep -cE '==SHELLUSER==|==PASSWD==' audit.log` → `0`); la ausencia no descarta
+un agente, solo esa variante.
 
 ---
 
@@ -92,6 +110,22 @@ reciclado programado o administración legítima.
 aplicación e identidad de instancia. Alertar por un aumento de terminaciones
 anómalas respecto de la línea base; un crash aislado no demuestra un ataque.
 
+### 2.3. `apache2` → `wget` sin shell intermedio (línea 14)
+
+Tres de los cuatro hallazgos pasan por `sh -c` (líneas 6, 9 y 16), que es lo que
+hacen `system()`/`exec()` en PHP, `child_process.exec` en Node y
+`os.system`/`subprocess(shell=True)` en Python. La línea 14 no: `apache2` lanza
+`wget` directamente. Eso es compatible con una ejecución que no pasa por el shell
+(por ejemplo `proc_open` con el comando como arreglo, disponible desde PHP 7.4, o
+`pcntl_exec`), con un cambio de técnica entre 09:42 y 09:44, o con un registro
+incompleto. El log no permite elegir entre esas opciones.
+
+Consecuencia para la detección: una regla que exija `sh` como hijo directo del
+servicio **pierde** esta línea. Por eso la lista de hijos tiene que incluir los
+descargadores como hijos directos, como ya hacen `detectar.sh` y la regla de §4.
+Como dato del lab, no del log: la imagen `php:8.3.35-apache` no trae `wget`, pero sí
+`curl` ([`capturas/08`](capturas/08-contencion-pruebas-antes.txt) §8).
+
 ---
 
 ## 3. Falsos positivos
@@ -146,6 +180,41 @@ no captura real de `execve`, entrega de alertas ni aislamiento automático. Ante
 desplegar una respuesta automática se requieren pruebas de falsos positivos,
 aprobación del responsable y un procedimiento de recuperación.
 
+**Por qué comparar campos y no hacer `grep` sobre la línea entera.** El filtro de
+`detectar.sh` busca `comm=(sh|bash|…)` sin anclar y sobre toda la línea, que incluye
+`args`, el único campo que controla el atacante. Con una línea de ejemplo
+(no está en `audit.log`):
+
+```text
+2026-10-27T09:50:00Z host=web01 ppid=700 ppid_comm=cron pid=701 comm=sha256sum args="sha256sum /tmp/ppid_comm=python"
+```
+
+el `grep` de `detectar.sh` la marca: `comm=sh` coincide con el prefijo de
+`sha256sum` y `ppid_comm=python` coincide **dentro de los argumentos**, aunque el
+padre real es `cron`. Es un falso positivo, y la misma técnica permite meter texto
+en `args` para confundir a quien lea el resultado. La regla de arriba compara campos
+fijos (`$4`, `$6`) con anclas `^…$` y no cae. Sobre el `audit.log` real los dos dan
+lo mismo (líneas 6, 9, 14 y 16 con la lista de `detectar.sh`), así que la diferencia
+no cambia los hallazgos, pero sí la confianza en la regla.
+
+**Qué aporta el lab sobre la regla** (evidencia del 01/11, no del log):
+
+- La imagen de `node-lab` trae `sh`, `bash` y `perl`, pero **no** `curl`, `wget` ni `nc`
+  ([`capturas/08`](capturas/08-contencion-pruebas-antes.txt) §8). En una imagen así la
+  cadena de la línea 9 fallaría en `curl`, pero `sh` se habría ejecutado igual: la
+  regla dispara por el primer salto, aunque el descargador no exista. Un atacante
+  que lo sepa usaría `fetch` desde el propio proceso o `perl`; `perl` está en la
+  lista, `fetch` es el falso negativo de memoria.
+- **Señal complementaria sin `execve`:** un cuerpo que no es Brotli con
+  `Content-Encoding: br` deja en `docker compose logs node-lab` un
+  `Error: Decompression failed … BrotliDecoder.zlibOnError` con
+  `code: 'ERR__ERROR_FORMAT_PADDING_1'`
+  ([`capturas/15`](capturas/15-logs-de-servicio.txt)). Una ráfaga de esos errores
+  indica que alguien está probando entradas contra el decoder, que es lo previo a
+  Node2Shell. Cubre en parte el falso negativo "payload en memoria", porque no
+  depende de que se cree un proceso. Límite: el error no trae la IP de origen ni la
+  ruta, porque `server.js` no tiene log de accesos.
+
 **Por qué sin excepciones:** `server.js` solo responde JSON y descomprime Brotli; no
 usa `child_process`. Cualquier hijo distinto de `node server.js` es anómalo. Si en
 el futuro la app necesitara lanzar procesos, se agrega una excepción explícita por
@@ -187,6 +256,38 @@ ruta y argumentos, no por nombre.
 - **Hosts sin contexto:** db01 aparece en el log pero no en nuestro inventario.
 - **Log sintético:** es un ejercicio; las IPs son de un rango de documentación y los
   PIDs no corresponden al laboratorio que levantamos.
+
+**Las fuentes que faltan, ¿existen en el lab?** Se revisaron el 01/11 los logs de
+cada servicio ([`capturas/15`](capturas/15-logs-de-servicio.txt)):
+
+| Servicio | ¿Registra pedidos? | ¿IP de origen? | ¿Sobrevive a un reinicio? |
+|---|---|---|---|
+| `py-lab` (svc01) | Sí, en `docker compose logs` | **Sí**: `172.27.0.3 - "GET / HTTP/1.1" 200` (la IP de `node-lab`) | Sí, mientras exista el contenedor |
+| `node-lab` (api01) | No: `server.js` no tiene log de accesos; solo quedan los errores, con stack trace | No | Sí, mientras exista el contenedor |
+| `php-lab` (web01) | Sí, en `/var/log/apache2/access.log`, **pero no** en `docker compose logs` | Sí | **No** |
+
+El caso de PHP es el más delicado. La imagen oficial enlaza `access.log` y `error.log`
+a stdout/stderr, pero el compose monta un `tmpfs` en `/var/log/apache2` que tapa esos
+enlaces. Resultado medido: el acceso desde `node-lab` quedó en `access.log` (81 bytes)
+y no en los logs de Docker; después de `docker compose restart php-lab`, `access.log`
+quedó en **0 bytes**. Es decir, la fuente principal para correlacionar PHP2Shell
+(pedidos y errores fatales de PHP) es volátil, y el reinicio que pide la mitigación
+de `upload_progress` la borra. En un incidente real hay que **copiar esos logs antes
+de reiniciar** y, en producción, enviarlos a un colector externo. No se modifica el
+compose del lab.
+
+Cuidado con el comando obvio: `docker compose cp php-lab:/var/log/apache2 <destino>`
+termina sin error, pero copia la capa de la imagen (los enlaces a `/dev/stdout` y
+`/dev/stderr`), **no** el contenido del `tmpfs`. Lo que sí funciona, probado:
+
+```bash
+docker compose exec -T php-lab tar -C /var/log -cf - apache2 > apache2-logs.tar
+```
+
+Para svc01 esto cambia lo que se puede afirmar: la conexión entrante desde otro
+servicio, que es lo que sostendría la hipótesis de movimiento lateral, **sí** quedaría
+registrada en un despliegue como el del lab. `audit.log` no la trae porque solo
+registra procesos.
 
 **Criterio de cierre:** una descarga fallida, un healthcheck correcto o la ausencia
 de coincidencias no descartan ejecución previa ni acceso a datos. Para cerrar se
