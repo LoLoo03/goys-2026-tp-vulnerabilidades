@@ -437,6 +437,20 @@ sin habilitar salida a Internet ni alterar la red interna del laboratorio.
   `sh`, `bash` y `perl`; `php-lab` además trae `curl`; ninguna trae `wget` ni `nc`
   ([`08`](capturas/08-contencion-pruebas-antes.txt) §8). Imágenes mínimas (sin shell)
   harían fallar la cadena `servicio → sh → descargador`; no se proponen para el lab.
+- **Disponibilidad: los controles no evitan la caída.** Según la cátedra, un intento
+  fallido de Node2Shell igual crashea el proceso (DoS sin autenticación). Ninguno de
+  los controles de la tabla lo impide: limitan lo que hace un atacante **después** de
+  ejecutar código, no que el decoder tire el proceso. Los tres servicios tienen
+  `restart: on-failure:3` en `docker-compose.yml`, así que Docker reintenta cuando el
+  proceso termina con error, pero hasta 3 veces; después lo deja caído. Con esa
+  política, unos pocos pedidos maliciosos bastarían para dejar la API fuera de servicio
+  hasta que alguien intervenga. Y si el que se reinicia es `php-lab`, el reinicio
+  automático borra `access.log` igual que el manual (`deteccion.md` §5). **No lo
+  probamos:** habría que crashear `node` a propósito, y no ejecutamos PoCs. Lo que sí
+  mitiga la caída es lo que corta el camino al decoder: el parche o el rechazo de
+  Brotli (fila anterior). En producción, además, alertar por reinicios y por
+  contenedores en estado `exited`, porque un reinicio automático exitoso esconde el
+  crash a quien solo mira el healthcheck.
 - El master de Apache corre como root con 5 capabilities. Los workers que procesan
   las peticiones no las tienen (probado), pero un escape del worker al master tendría
   más superficie; el log sintético no mide ataques sobre ese contenedor.
