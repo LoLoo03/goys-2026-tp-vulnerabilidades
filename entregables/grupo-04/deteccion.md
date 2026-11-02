@@ -269,6 +269,16 @@ ruta y argumentos, no por nombre.
   198.51.100.9 ni del tráfico entre hosts (necesario para confirmar el movimiento
   lateral hacia svc01 y db01).
 - **Sin hash ni ruta completa** del binario: un `sh` falso o renombrado se vería igual.
+- **Relojes sin garantía de sincronía:** la secuencia entre hosts (web01 09:42 →
+  api01 09:43 → svc01 09:45, y db01 en el medio) se arma comparando timestamps de
+  cuatro máquinas distintas. Eso supone que sus relojes estaban sincronizados (NTP) y
+  el log no lo acredita. Con una deriva de un par de minutos, el orden se puede
+  invertir: por ejemplo, la primera sesión SSH de db01 (09:42:40) podría ser anterior
+  a todo lo de web01. Dentro de un mismo host el orden es confiable; **entre hosts**,
+  la secuencia es una hipótesis. Además, la resolución es de **1 segundo**: `sh -c id`
+  e `id` (09:42:17 y :18) quedan separados, pero dos eventos del mismo segundo no se
+  pueden ordenar. Para un incidente real habría que registrar el estado de NTP de
+  cada host junto con los eventos.
 - **Hosts sin contexto:** db01 aparece en el log pero no en nuestro inventario.
 - **Log sintético:** es un ejercicio; las IPs son de un rango de documentación y los
   PIDs no corresponden al laboratorio que levantamos.
