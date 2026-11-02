@@ -1,6 +1,6 @@
 # Detección y caza — Grupo 04
 
-**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10), Naim Guarino (revisión y pruebas en el lab, 01/11) · **Fecha:** jueves 29/10/2026
+**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10), Naim Guarino (revisión y pruebas en el lab, 01/11), Valentino Siadore (revisión documental, 01/11) · **Fecha:** jueves 29/10/2026
 
 Fuente: `laboratorio/logs/audit.log` (21 líneas, 2026-10-27 09:40–09:49 UTC).
 **Alcance de la revisión local (01/11/2026):** análisis documental del log sintético
@@ -234,6 +234,22 @@ ruta y argumentos, no por nombre.
   `node`) en lugar del padre directo (ver 2.1).
 - **Intentos fallidos:** un exploit que crashea `node` sin llegar a ejecutar nada no
   crea hijos. Se cubre con la alerta de reinicios por crash de la sección 2.2.
+- **El nombre del proceso lo controla el propio proceso.** La regla compara
+  `ppid_comm` y `comm`, que son el nombre corto que guarda el kernel, no la ruta del
+  ejecutable. Un proceso puede cambiar su propio nombre escribiendo en
+  `/proc/self/comm` (o con `prctl(PR_SET_NAME)`), y el `read_only` del contenedor no lo
+  impide porque `/proc` no es parte del filesystem de la imagen. Si el código del
+  atacante ya corre dentro de `node`, puede renombrar ese proceso a, por ejemplo,
+  `apache2` antes de lanzar `sh`: el evento saldría con `ppid_comm=apache2` en api01
+  y la regla no dispararía. Además, el kernel corta ese nombre en **15 caracteres**:
+  un binario llamado `curl-estatico-x86` aparece como `curl-estatico-x` y no coincide
+  con `curl` en una comparación exacta. Mejora: comparar por la **ruta del
+  ejecutable** del padre y del hijo (`/proc/<pid>/exe`, o el campo `exe` de auditd o
+  eBPF) y por identidad del contenedor, no por nombre. Lo comprobamos en un Linux
+  común, **fuera del lab** y sin nada malicioso: un proceso sin privilegios escribió
+  `apache2` en su `/proc/self/comm`, y el `sh` que lanzó después vio a su padre como
+  `apache2`; una copia de `sleep` llamada `curl-estatico-x86` figuró como
+  `curl-estatico-x`. No lo repetimos dentro de `node-lab`.
 - **Procesos muy cortos:** si la telemetría muestrea (como `docker top`) en vez de
   registrar cada `execve`, un `curl` de un segundo se pierde.
 
@@ -253,6 +269,16 @@ ruta y argumentos, no por nombre.
   198.51.100.9 ni del tráfico entre hosts (necesario para confirmar el movimiento
   lateral hacia svc01 y db01).
 - **Sin hash ni ruta completa** del binario: un `sh` falso o renombrado se vería igual.
+- **Relojes sin garantía de sincronía:** la secuencia entre hosts (web01 09:42 →
+  api01 09:43 → svc01 09:45, y db01 en el medio) se arma comparando timestamps de
+  cuatro máquinas distintas. Eso supone que sus relojes estaban sincronizados (NTP) y
+  el log no lo acredita. Con una deriva de un par de minutos, el orden se puede
+  invertir: por ejemplo, la primera sesión SSH de db01 (09:42:40) podría ser anterior
+  a todo lo de web01. Dentro de un mismo host el orden es confiable; **entre hosts**,
+  la secuencia es una hipótesis. Además, la resolución es de **1 segundo**: `sh -c id`
+  e `id` (09:42:17 y :18) quedan separados, pero dos eventos del mismo segundo no se
+  pueden ordenar. Para un incidente real habría que registrar el estado de NTP de
+  cada host junto con los eventos.
 - **Hosts sin contexto:** db01 aparece en el log pero no en nuestro inventario.
 - **Log sintético:** es un ejercicio; las IPs son de un rango de documentación y los
   PIDs no corresponden al laboratorio que levantamos.

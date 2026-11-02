@@ -8,6 +8,7 @@
 | Lorenzo Bellomo | LoLoo03 | Inventario, cambios/parche, detección, contención/comunicación |
 | Agustin Ignacio Kloster | AgusKlos | Revisión de `entrega.md` y `deteccion.md`, preparación del comité |
 | Naim Guarino | naimguar | Re-ejecución del laboratorio (01/11): pruebas de comportamiento de contención, pruebas funcionales y revisión de `deteccion.md` |
+| Valentino Siadore | valentinosiadore | Revisión documental (01/11) de `entrega.md` y `deteccion.md` contra el contexto actualizado de la cátedra: pregunta 3 del comité, plazos KEV, riesgo de DoS y limitaciones de la regla. No levantó el laboratorio |
 
 > El taller en el aula (29/10) lo ejecutó un solo integrante, Lorenzo Bellomo; por eso
 > concentra los cuatro roles, y su `informe.md` lo refleja. La revisión posterior
@@ -149,6 +150,17 @@ y servicio interno validan sus respectivas operaciones. El rechazo de Brotli es
 una compensación propuesta, no un control desplegado ni una razón para posponer
 sin pruebas. Los datos de explotación se atribuyen al contexto actualizado; los
 eventos del log no identifican por sí solos un CVE.
+
+**Por qué < 24 h y no "antes del vencimiento KEV".** Cada entrada del catálogo KEV
+trae una fecha límite: Node2Shell vence el **10/11** y Fragnesia el **31/10**, con
+triage forense (contexto de la cátedra, §2 y §3). Esa fecha es obligatoria para
+agencias federales de EE. UU.; para nuestra organización ficticia la tomamos como
+**techo**, no como objetivo. Nuestro plazo es más corto porque además de KEV hay
+datos personales en el portal, exposición supuesta a Internet y señales en el log del
+escenario. Si alguna de esas tres condiciones no se cumpliera, el techo KEV seguiría
+valiendo. Fragnesia es el caso más ajustado: al 29/10 quedaban dos días y el kernel del
+entorno del taller no se relevó (§5), así que su evaluación no puede esperar al cierre
+de los parches de aplicación.
 
 **Qué evidencia cambiaría el orden:**
 
@@ -425,6 +437,20 @@ sin habilitar salida a Internet ni alterar la red interna del laboratorio.
   `sh`, `bash` y `perl`; `php-lab` además trae `curl`; ninguna trae `wget` ni `nc`
   ([`08`](capturas/08-contencion-pruebas-antes.txt) §8). Imágenes mínimas (sin shell)
   harían fallar la cadena `servicio → sh → descargador`; no se proponen para el lab.
+- **Disponibilidad: los controles no evitan la caída.** Según la cátedra, un intento
+  fallido de Node2Shell igual crashea el proceso (DoS sin autenticación). Ninguno de
+  los controles de la tabla lo impide: limitan lo que hace un atacante **después** de
+  ejecutar código, no que el decoder tire el proceso. Los tres servicios tienen
+  `restart: on-failure:3` en `docker-compose.yml`, así que Docker reintenta cuando el
+  proceso termina con error, pero hasta 3 veces; después lo deja caído. Con esa
+  política, unos pocos pedidos maliciosos bastarían para dejar la API fuera de servicio
+  hasta que alguien intervenga. Y si el que se reinicia es `php-lab`, el reinicio
+  automático borra `access.log` igual que el manual (`deteccion.md` §5). **No lo
+  probamos:** habría que crashear `node` a propósito, y no ejecutamos PoCs. Lo que sí
+  mitiga la caída es lo que corta el camino al decoder: el parche o el rechazo de
+  Brotli (fila anterior). En producción, además, alertar por reinicios y por
+  contenedores en estado `exited`, porque un reinicio automático exitoso esconde el
+  crash a quien solo mira el healthcheck.
 - El master de Apache corre como root con 5 capabilities. Los workers que procesan
   las peticiones no las tienen (probado), pero un escape del worker al master tendría
   más superficie; el log sintético no mide ataques sobre ese contenedor.
@@ -487,7 +513,7 @@ relevamiento del kernel antes de dar el riesgo por cerrado.
 |---|---|---|---|
 | 1 | ¿Parcheamos en caliente facturación sin entorno de pruebas? | No a ciegas, pero tampoco esperamos. Ahora: mitigación de una línea, reversible en segundos. El mismo día: respaldo, ventana corta, actualización y una operación de prueba (emitir una factura de prueba). La reversión requiere imagen limpia, aislamiento y aceptación del riesgo residual; no se reabre una versión vulnerable por el solo hecho de recuperar disponibilidad. Con una falla en KEV, el riesgo de no parchear es mayor | §3: mitigación y reversión de PHP; parche en segundos por servicio |
 | 2 | El hosting no actualiza PHP hasta el viernes. ¿Qué compensamos? | Hasta el viernes: (a) `upload_progress = 0`; (b) restringir quién llega al portal (VPN o lista de IPs, si el uso lo permite); (c) bloquear la salida a Internet del servidor; (d) alerta por procesos hijos de `apache2`. Verificación: valor del `.ini`, prueba de salida que falla y regla contrastada documentalmente con `audit.log`, sin despliegue de alertas. El dueño del portal firma la aceptación del riesgo residual hasta el viernes | §3, §5 (`SIN SALIDA`), `deteccion.md` §4 |
-| 3 | Pregunta original: «Node2Shell no se explota todavía. ¿Ventana de emergencia?» | La premisa quedó desactualizada: la cátedra informa explotación y KEV desde el 27/10. Proponemos actualizar la API en **< 24 h**, comprobar su operación y evaluar rechazo de Brotli antes del decoder mientras tanto. Python comparte plazo urgente por el componente y las señales del escenario. La contención de actividad corroborada es inmediata, sin esperar al parche | §2; contexto actualizado de la cátedra; `deteccion.md` §2 |
+| 3 | Pregunta actualizada por la cátedra: «Node2Shell está en KEV pero el exploit público visto en el mundo real falla. ¿Justifica una ventana de emergencia? ¿Con qué evidencia cambiarías la decisión?» | **Sí, la justifica.** Que el exploit público esté roto no nos protege por tres motivos. (1) Ya hay RCE logrado por otros: ELLIO lo consiguió en cuatro configuraciones y Imperva lo demostró en laboratorio; un atacante con un exploit propio no depende del público. (2) Aunque falle, el intento **tira la API**: cada falla crashea el proceso, o sea que es una caída sin necesidad de usuario. En nuestro compose, después de 3 caídas Docker deja de reiniciarla (§5). (3) Está en KEV con vencimiento el 10/11. Proponemos actualizar la API en **< 24 h** y, hasta entonces, rechazar Brotli antes del decoder (probado como propuesta, §5). Python comparte plazo por el componente y las señales del escenario. **Qué nos haría cambiar la decisión:** bajaríamos a ventana ordinaria (antes del 10/11) solo si se probara que ningún cliente llega al decoder: proxy que descarta `Content-Encoding: br` delante de la API, verificado con un pedido benigno que reciba 415 o 400 antes de body-parser, y que la API no descomprima respuestas de terceros (hoy `server.js` no usa `fetch`; si lo agregara, `fetch` descomprime `br` solo). Al revés, cualquier reinicio sin causa operativa o un error `Decompression failed` en ráfaga (`deteccion.md` §4) lo pasa de vulnerabilidad a incidente: aislar primero | §2; §5 (rechazo de Brotli, `restart`); contexto de la cátedra (ELLIO, Imperva, KEV); `deteccion.md` §2.2 y §4 |
 | 4 | ¿Qué le decimos a clientes y cuándo? | Cuando tengamos el alcance mínimo y la contención en marcha, sin esperar a cerrar la investigación. Mensaje inicial: investigamos actividad sospechosa, indicamos únicamente las medidas realmente aplicadas y fijamos la próxima actualización. No se afirma que la actividad fue contenida ni que hubo acceso a datos sin confirmación. Nunca: versiones, qué falta parchear, IPs ni vector. Como el portal guarda datos personales, legales evalúa si hay obligación de notificar según la normativa de protección de datos personales (en Argentina, Ley 25.326). Esa obligación no la verificamos nosotros | No aplica: es una decisión de legales y comunicación, no una afirmación técnica |
 | 5 | Si el atacante usa un agente para post-explotación, ¿qué sigue funcionando? | Lo que no depende del perímetro, y lo probamos uno por uno: el agente no puede pedir instrucciones afuera (la salida a Internet falla), no puede dejar archivos en el código ni correr un programa bajado a `/tmp`, no es administrador del contenedor (en PHP, el proceso que atiende pedidos tampoco) y no puede lanzar procesos sin límite. Lo que **no** frena, también medido: puede hablar con los otros dos servicios de la red interna y puede usar las herramientas que ya trae cada servidor (`sh`, `perl`, `curl` en el portal). Por eso pedimos segmentar en producción. La regla detecta hijos de Node de su lista, pero no ejecución en memoria (`deteccion.md` §4) | §5 (pruebas del 01/11), `deteccion.md` §2.1 y §4 |
 | 6 | ¿Qué nos hace pasar de "monitorear" a "apagar"? | Ejecución de comandos desde un servicio (representada en el log sintético del 27/10), conexiones salientes exitosas, acceso no explicado a db01 o señales de exfiltración. Con la primera ya corresponde **aislar**, que es lo que pedimos autorizar en la apertura. Apagar destruye la memoria, que es evidencia: preferimos cortar la red y apagar solo si aislar no alcanza | `deteccion.md` §2 |
