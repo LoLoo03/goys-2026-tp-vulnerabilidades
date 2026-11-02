@@ -151,6 +151,17 @@ una compensación propuesta, no un control desplegado ni una razón para pospone
 sin pruebas. Los datos de explotación se atribuyen al contexto actualizado; los
 eventos del log no identifican por sí solos un CVE.
 
+**Por qué < 24 h y no "antes del vencimiento KEV".** Cada entrada del catálogo KEV
+trae una fecha límite: Node2Shell vence el **10/11** y Fragnesia el **31/10**, con
+triage forense (contexto de la cátedra, §2 y §3). Esa fecha es obligatoria para
+agencias federales de EE. UU.; para nuestra organización ficticia la tomamos como
+**techo**, no como objetivo. Nuestro plazo es más corto porque además de KEV hay
+datos personales en el portal, exposición supuesta a Internet y señales en el log del
+escenario. Si alguna de esas tres condiciones no se cumpliera, el techo KEV seguiría
+valiendo. Fragnesia es el caso más ajustado: al 29/10 quedaban dos días y el kernel del
+entorno del taller no se relevó (§5), así que su evaluación no puede esperar al cierre
+de los parches de aplicación.
+
 **Qué evidencia cambiaría el orden:**
 
 - Compromiso real corroborado, acceso a datos o movimiento lateral en cualquier
