@@ -234,6 +234,22 @@ ruta y argumentos, no por nombre.
   `node`) en lugar del padre directo (ver 2.1).
 - **Intentos fallidos:** un exploit que crashea `node` sin llegar a ejecutar nada no
   crea hijos. Se cubre con la alerta de reinicios por crash de la sección 2.2.
+- **El nombre del proceso lo controla el propio proceso.** La regla compara
+  `ppid_comm` y `comm`, que son el nombre corto que guarda el kernel, no la ruta del
+  ejecutable. Un proceso puede cambiar su propio nombre escribiendo en
+  `/proc/self/comm` (o con `prctl(PR_SET_NAME)`), y el `read_only` del contenedor no lo
+  impide porque `/proc` no es parte del filesystem de la imagen. Si el código del
+  atacante ya corre dentro de `node`, puede renombrar ese proceso a, por ejemplo,
+  `apache2` antes de lanzar `sh`: el evento saldría con `ppid_comm=apache2` en api01
+  y la regla no dispararía. Además, el kernel corta ese nombre en **15 caracteres**:
+  un binario llamado `curl-estatico-x86` aparece como `curl-estatico-x` y no coincide
+  con `curl` en una comparación exacta. Mejora: comparar por la **ruta del
+  ejecutable** del padre y del hijo (`/proc/<pid>/exe`, o el campo `exe` de auditd o
+  eBPF) y por identidad del contenedor, no por nombre. Lo comprobamos en un Linux
+  común, **fuera del lab** y sin nada malicioso: un proceso sin privilegios escribió
+  `apache2` en su `/proc/self/comm`, y el `sh` que lanzó después vio a su padre como
+  `apache2`; una copia de `sleep` llamada `curl-estatico-x86` figuró como
+  `curl-estatico-x`. No lo repetimos dentro de `node-lab`.
 - **Procesos muy cortos:** si la telemetría muestrea (como `docker top`) en vez de
   registrar cada `execve`, un `curl` de un segundo se pierde.
 
