@@ -1,6 +1,6 @@
 # Detección y caza — Grupo 04
 
-**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10), Naim Guarino (revisión y pruebas en el lab, 01/11) · **Fecha:** jueves 29/10/2026
+**Integrantes:** Lorenzo Bellomo (análisis), Agustin Ignacio Kloster (revisión, 30/10), Naim Guarino (revisión y pruebas en el lab, 01/11), Valentino Siadore (revisión documental, 01/11) · **Fecha:** jueves 29/10/2026
 
 Fuente: `laboratorio/logs/audit.log` (21 líneas, 2026-10-27 09:40–09:49 UTC).
 **Alcance de la revisión local (01/11/2026):** análisis documental del log sintético

@@ -8,6 +8,7 @@
 | Lorenzo Bellomo | LoLoo03 | Inventario, cambios/parche, detección, contención/comunicación |
 | Agustin Ignacio Kloster | AgusKlos | Revisión de `entrega.md` y `deteccion.md`, preparación del comité |
 | Naim Guarino | naimguar | Re-ejecución del laboratorio (01/11): pruebas de comportamiento de contención, pruebas funcionales y revisión de `deteccion.md` |
+| Valentino Siadore | valentinosiadore | Revisión documental (01/11) de `entrega.md` y `deteccion.md` contra el contexto actualizado de la cátedra: pregunta 3 del comité, plazos KEV, riesgo de DoS y limitaciones de la regla. No levantó el laboratorio |
 
 > El taller en el aula (29/10) lo ejecutó un solo integrante, Lorenzo Bellomo; por eso
 > concentra los cuatro roles, y su `informe.md` lo refleja. La revisión posterior
